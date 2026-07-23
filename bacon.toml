@@ -1,0 +1,10 @@
+#:schema https://dystroy.org/bacon/.bacon.schema.json
+
+[jobs.check]
+command = ['cargo', 'check', '--all-targets']
+
+[jobs.clippy]
+command = ['cargo', 'clippy', '--all-targets']
+
+[jobs.test]
+command = ['cargo', 'test']
