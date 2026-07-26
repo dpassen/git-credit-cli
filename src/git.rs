@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -69,6 +69,58 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<String> {
     )?;
 
     Ok(oid)
+}
+
+pub fn ensure_safe_state(dir: &Path, head_oid: &str) -> anyhow::Result<()> {
+    const OPERATION_MARKERS: [&str; 6] = [
+        "MERGE_HEAD",
+        "rebase-merge",
+        "rebase-apply",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "sequencer",
+    ];
+
+    for marker in OPERATION_MARKERS {
+        if git_path(dir, marker)?.exists() {
+            bail!("another Git operation is in progress");
+        }
+    }
+
+    let output = Command::new("git")
+        .args(["diff", "--cached", "--quiet", head_oid, "--"])
+        .current_dir(dir)
+        .output()
+        .context("failed to inspect staged changes")?;
+
+    match output.status.code() {
+        Some(0) => Ok(()),
+        Some(1) => bail!("staged changes are present"),
+        _ => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
+
+            if stderr.is_empty() {
+                bail!("could not inspect staged changes");
+            }
+
+            bail!("could not inspect staged changes: {stderr}");
+        }
+    }
+}
+
+fn git_path(dir: &Path, name: &str) -> anyhow::Result<PathBuf> {
+    let path = PathBuf::from(git_stdout(
+        dir,
+        &["rev-parse", "--git-path", name],
+        "could not inspect Git operation state",
+    )?);
+
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(dir.join(path))
+    }
 }
 
 pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<Contributor>> {
@@ -219,11 +271,18 @@ fn contributor_order(left: &Contributor, right: &Contributor) -> std::cmp::Order
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path, process::Command};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        process::Command,
+    };
 
     use tempfile::TempDir;
 
-    use super::{Contributor, discover_contributors, inspect_head, prepare_message, read_message};
+    use super::{
+        Contributor, discover_contributors, ensure_safe_state, inspect_head, prepare_message,
+        read_message,
+    };
 
     fn git(dir: &Path, args: &[&str]) -> String {
         let output = Command::new("git")
@@ -366,6 +425,71 @@ mod tests {
                 commits: 3,
             }]
         );
+    }
+
+    #[test]
+    fn rejects_staged_changes() {
+        let repo = init_repository();
+        let oid = commit_file(repo.path());
+        fs::write(repo.path().join("file.txt"), "staged contents\n")
+            .expect("test file should be written");
+        git(repo.path(), &["add", "file.txt"]);
+
+        let error =
+            ensure_safe_state(repo.path(), &oid).expect_err("staged changes should be rejected");
+
+        assert_eq!(error.to_string(), "staged changes are present");
+    }
+
+    #[test]
+    fn allows_unstaged_and_untracked_changes() {
+        let repo = init_repository();
+        let oid = commit_file(repo.path());
+        fs::write(repo.path().join("file.txt"), "unstaged contents\n")
+            .expect("tracked file should be written");
+        fs::write(repo.path().join("untracked.txt"), "untracked contents\n")
+            .expect("untracked file should be written");
+
+        ensure_safe_state(repo.path(), &oid).expect("working tree changes should be allowed");
+    }
+
+    #[test]
+    fn rejects_in_progress_git_operations() {
+        let repo = init_repository();
+        let oid = commit_file(repo.path());
+        let markers = [
+            ("MERGE_HEAD", false),
+            ("rebase-merge", true),
+            ("rebase-apply", true),
+            ("CHERRY_PICK_HEAD", false),
+            ("REVERT_HEAD", false),
+            ("sequencer", true),
+        ];
+
+        for (marker, is_directory) in markers {
+            let path = PathBuf::from(git(repo.path(), &["rev-parse", "--git-path", marker]));
+            let path = if path.is_absolute() {
+                path
+            } else {
+                repo.path().join(path)
+            };
+
+            if is_directory {
+                fs::create_dir_all(&path).expect("operation directory should be created");
+            } else {
+                fs::write(&path, "operation state\n").expect("operation file should be written");
+            }
+
+            let error = ensure_safe_state(repo.path(), &oid)
+                .expect_err("in-progress operation should be rejected");
+            assert_eq!(error.to_string(), "another Git operation is in progress");
+
+            if is_directory {
+                fs::remove_dir_all(path).expect("operation directory should be removed");
+            } else {
+                fs::remove_file(path).expect("operation file should be removed");
+            }
+        }
     }
 
     #[test]

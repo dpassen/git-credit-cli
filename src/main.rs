@@ -16,6 +16,7 @@ fn main() -> anyhow::Result<()> {
 
     let cwd = std::env::current_dir()?;
     let head_oid = git::inspect_head(&cwd)?;
+    git::ensure_safe_state(&cwd, &head_oid)?;
     let contributors = git::discover_contributors(&cwd, &head_oid)?;
 
     if contributors.is_empty() {
