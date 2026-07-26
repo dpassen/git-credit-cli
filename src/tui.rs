@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeSet,
+    fmt::Write as _,
     io::{IsTerminal, stdin, stdout},
 };
 
@@ -64,6 +65,9 @@ struct Picker {
     cursor: usize,
     selected: BTreeSet<usize>,
     matcher: Matcher,
+    match_scores: Vec<(usize, u32)>,
+    identity_buffer: String,
+    utf32_buffer: Vec<char>,
 }
 
 impl Picker {
@@ -75,6 +79,9 @@ impl Picker {
             cursor: 0,
             selected: BTreeSet::new(),
             matcher: Matcher::new(Config::DEFAULT),
+            match_scores: Vec::new(),
+            identity_buffer: String::new(),
+            utf32_buffer: Vec::new(),
         };
         picker.refilter(contributors);
         picker
@@ -156,9 +163,11 @@ impl Picker {
 
     fn refilter(&mut self, contributors: &[Contributor]) {
         self.cursor = 0;
+        self.matches.clear();
+        self.match_scores.clear();
 
         if self.query.is_empty() {
-            self.matches = (0..contributors.len()).collect();
+            self.matches.extend(0..contributors.len());
             return;
         }
 
@@ -168,24 +177,29 @@ impl Picker {
             Normalization::Smart,
             AtomKind::Fuzzy,
         );
-        let mut utf32_buf = Vec::new();
-        let mut matches: Vec<_> = contributors
-            .iter()
-            .enumerate()
-            .filter_map(|(index, contributor)| {
-                let identity = format!("{} <{}>", contributor.name, contributor.email);
-                pattern
-                    .score(Utf32Str::new(&identity, &mut utf32_buf), &mut self.matcher)
-                    .map(|score| (index, score))
-            })
-            .collect();
+        for (index, contributor) in contributors.iter().enumerate() {
+            self.identity_buffer.clear();
+            self.identity_buffer.push_str(&contributor.name);
+            self.identity_buffer.push_str(" <");
+            self.identity_buffer.push_str(&contributor.email);
+            self.identity_buffer.push('>');
 
-        matches.sort_by(|(left_index, left_score), (right_index, right_score)| {
-            right_score
-                .cmp(left_score)
-                .then_with(|| left_index.cmp(right_index))
-        });
-        self.matches = matches.into_iter().map(|(index, _)| index).collect();
+            if let Some(score) = pattern.score(
+                Utf32Str::new(&self.identity_buffer, &mut self.utf32_buffer),
+                &mut self.matcher,
+            ) {
+                self.match_scores.push((index, score));
+            }
+        }
+
+        self.match_scores
+            .sort_by(|(left_index, left_score), (right_index, right_score)| {
+                right_score
+                    .cmp(left_score)
+                    .then_with(|| left_index.cmp(right_index))
+            });
+        self.matches
+            .extend(self.match_scores.iter().map(|(index, _)| index));
     }
 
     fn render(
@@ -274,10 +288,12 @@ impl Picker {
         let mut body = String::from("Add these co-authors to HEAD?\n\n");
         for index in &self.selected {
             let contributor = &contributors[*index];
-            body.push_str(&format!(
-                "Co-authored-by: {} <{}>\n",
+            writeln!(
+                body,
+                "Co-authored-by: {} <{}>",
                 contributor.name, contributor.email
-            ));
+            )
+            .expect("writing to a String should not fail");
         }
         body.push_str("\nAmending HEAD will change its commit ID.");
 

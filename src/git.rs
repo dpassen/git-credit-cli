@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::Entry},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -163,17 +163,14 @@ pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<C
         .filter(|identity| !identity.email.eq_ignore_ascii_case(&head_author_email))
     {
         let normalized_email = identity.email.to_ascii_lowercase();
-        match groups.get_mut(&normalized_email) {
-            Some(group) => group.add(identity),
-            None => {
+        match groups.entry(normalized_email) {
+            Entry::Occupied(mut entry) => entry.get_mut().add(identity),
+            Entry::Vacant(entry) => {
                 let preferred_identity_commits = identity.commits;
-                groups.insert(
-                    normalized_email,
-                    ContributorGroup {
-                        contributor: identity,
-                        preferred_identity_commits,
-                    },
-                );
+                entry.insert(ContributorGroup {
+                    contributor: identity,
+                    preferred_identity_commits,
+                });
             }
         }
     }

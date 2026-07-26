@@ -8,6 +8,12 @@ description = "CLI for safely adding Co-authored-by trailers to your latest Git 
 readme = "README.md"
 repository = "https://github.com/dpassen/git-credit-cli"
 
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+format_push_string = "warn"
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.4", features = ["derive"] }
