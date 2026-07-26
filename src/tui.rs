@@ -52,6 +52,7 @@ fn run_list(
 }
 
 struct Picker {
+    view: View,
     query: String,
     matches: Vec<usize>,
     cursor: usize,
@@ -62,6 +63,7 @@ struct Picker {
 impl Picker {
     fn new(contributors: &[Contributor]) -> Self {
         let mut picker = Self {
+            view: View::Picker,
             query: String::new(),
             matches: Vec::new(),
             cursor: 0,
@@ -73,9 +75,17 @@ impl Picker {
     }
 
     fn handle_key(&mut self, key: KeyEvent, contributors: &[Contributor]) -> Action {
+        match self.view {
+            View::Picker => self.handle_picker_key(key, contributors),
+            View::Confirmation => self.handle_confirmation_key(key),
+        }
+    }
+
+    fn handle_picker_key(&mut self, key: KeyEvent, contributors: &[Contributor]) -> Action {
         match key.code {
             KeyCode::Esc => return Action::Cancel,
-            KeyCode::Enter => return Action::Confirm,
+            KeyCode::Enter if self.selected.is_empty() => return Action::Confirm,
+            KeyCode::Enter => self.view = View::Confirmation,
             KeyCode::Up => self.move_up(),
             KeyCode::Down => self.move_down(),
             KeyCode::Backspace => {
@@ -101,6 +111,17 @@ impl Picker {
         }
 
         Action::Continue
+    }
+
+    fn handle_confirmation_key(&mut self, key: KeyEvent) -> Action {
+        match key.code {
+            KeyCode::Enter => Action::Confirm,
+            KeyCode::Esc => {
+                self.view = View::Picker;
+                Action::Continue
+            }
+            _ => Action::Continue,
+        }
     }
 
     fn move_up(&mut self) {
@@ -162,6 +183,13 @@ impl Picker {
     }
 
     fn render(&self, frame: &mut Frame, contributors: &[Contributor]) {
+        match self.view {
+            View::Picker => self.render_picker(frame, contributors),
+            View::Confirmation => self.render_confirmation(frame, contributors),
+        }
+    }
+
+    fn render_picker(&self, frame: &mut Frame, contributors: &[Contributor]) {
         let [search_area, list_area, help_area] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(1),
@@ -202,6 +230,33 @@ impl Picker {
             help_area,
         );
     }
+
+    fn render_confirmation(&self, frame: &mut Frame, contributors: &[Contributor]) {
+        let [body_area, help_area] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
+
+        let mut body = String::from("Add these co-authors to HEAD?\n\n");
+        for index in &self.selected {
+            let contributor = &contributors[*index];
+            body.push_str(&format!(
+                "Co-authored-by: {} <{}>\n",
+                contributor.name, contributor.email
+            ));
+        }
+        body.push_str("\nAmending HEAD will change its commit ID.");
+
+        frame.render_widget(
+            Paragraph::new(body).block(Block::bordered().title(" Confirm co-authors ")),
+            body_area,
+        );
+        frame.render_widget(Paragraph::new("Enter confirm  Esc back"), help_area);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum View {
+    Picker,
+    Confirmation,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -215,7 +270,7 @@ enum Action {
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    use super::{Action, Picker};
+    use super::{Action, Picker, View};
     use crate::git::Contributor;
 
     fn contributors() -> Vec<Contributor> {
@@ -285,10 +340,41 @@ mod tests {
     }
 
     #[test]
-    fn enter_confirms_the_selection() {
+    fn enter_with_selections_opens_confirmation() {
         let contributors = contributors();
         let mut picker = Picker::new(&contributors);
         picker.toggle_selected();
+
+        let action = picker.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &contributors,
+        );
+
+        assert_eq!(action, Action::Continue);
+        assert_eq!(picker.view, View::Confirmation);
+    }
+
+    #[test]
+    fn escape_from_confirmation_returns_to_picker() {
+        let contributors = contributors();
+        let mut picker = Picker::new(&contributors);
+        picker.view = View::Confirmation;
+
+        let action = picker.handle_key(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &contributors,
+        );
+
+        assert_eq!(action, Action::Continue);
+        assert_eq!(picker.view, View::Picker);
+    }
+
+    #[test]
+    fn enter_on_confirmation_confirms_the_selection() {
+        let contributors = contributors();
+        let mut picker = Picker::new(&contributors);
+        picker.toggle_selected();
+        picker.view = View::Confirmation;
 
         let action = picker.handle_key(
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
