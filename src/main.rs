@@ -39,7 +39,23 @@ fn main() -> anyhow::Result<()> {
         .map(|index| &contributors[index])
         .collect();
     let prepared = git::prepare_message(&cwd, &message, &selected_contributors)?;
-    print!("{prepared}");
+    let new_oid = git::amend_head(&cwd, &prepared)?;
+    let count = selected_contributors.len();
+    let label = if count == 1 {
+        "co-author"
+    } else {
+        "co-authors"
+    };
+
+    println!(
+        "Added {count} {label}: {} -> {}",
+        abbreviate_oid(&head_oid),
+        abbreviate_oid(&new_oid)
+    );
 
     Ok(())
+}
+
+fn abbreviate_oid(oid: &str) -> &str {
+    oid.get(..8).unwrap_or(oid)
 }
