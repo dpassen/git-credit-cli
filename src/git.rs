@@ -4,7 +4,6 @@ use anyhow::{Context, bail};
 
 #[derive(Debug)]
 pub struct Head {
-    pub branch: String,
     pub oid: String,
 }
 
@@ -54,7 +53,7 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<Head> {
         bail!("not inside a Git working tree");
     }
 
-    let branch = git_stdout(
+    git_stdout(
         dir,
         &["symbolic-ref", "--quiet", "--short", "HEAD"],
         "HEAD is detached",
@@ -66,7 +65,7 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<Head> {
         "could not resolve HEAD to a commit",
     )?;
 
-    Ok(Head { branch, oid })
+    Ok(Head { oid })
 }
 
 pub fn discover_contributors(dir: &Path, head: &Head) -> anyhow::Result<Vec<Contributor>> {
@@ -227,7 +226,6 @@ mod tests {
 
         let head = inspect_head(&subdirectory).expect("HEAD should be inspected");
 
-        assert_eq!(head.branch, "main");
         assert_eq!(head.oid, oid);
     }
 
