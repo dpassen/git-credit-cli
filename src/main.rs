@@ -26,10 +26,17 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    for index in selected {
-        let contributor = &contributors[index];
-        println!("{} <{}>", contributor.name, contributor.email);
+    if selected.is_empty() {
+        return Ok(());
     }
+
+    let message = git::read_message(&cwd, &head_oid)?;
+    let selected_contributors: Vec<_> = selected
+        .into_iter()
+        .map(|index| &contributors[index])
+        .collect();
+    let prepared = git::prepare_message(&cwd, &message, &selected_contributors)?;
+    print!("{prepared}");
 
     Ok(())
 }

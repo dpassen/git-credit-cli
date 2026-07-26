@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::Path, process::Command};
+use std::{
+    collections::HashMap,
+    io::Write,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 use anyhow::{Context, bail};
 
@@ -14,7 +19,7 @@ struct ContributorGroup {
     preferred_identity_commits: u64,
 }
 
-fn git_stdout(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
+fn git_output(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -34,7 +39,10 @@ fn git_stdout(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String
 
     String::from_utf8(output.stdout)
         .with_context(|| format!("git {} returned invalid UTF-8", args.join(" ")))
-        .map(|stdout| stdout.trim().to_owned())
+}
+
+fn git_stdout(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
+    git_output(dir, args, failure).map(|stdout| stdout.trim().to_owned())
 }
 
 pub fn inspect_head(dir: &Path) -> anyhow::Result<String> {
@@ -105,6 +113,66 @@ pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<C
     Ok(contributors)
 }
 
+pub fn read_message(dir: &Path, oid: &str) -> anyhow::Result<String> {
+    git_output(
+        dir,
+        &["show", "--no-patch", "--format=format:%B", oid],
+        "could not read commit message",
+    )
+}
+
+pub fn prepare_message(
+    dir: &Path,
+    message: &str,
+    contributors: &[&Contributor],
+) -> anyhow::Result<String> {
+    if contributors.is_empty() {
+        return Ok(message.to_owned());
+    }
+
+    let mut command = Command::new("git");
+    command
+        .arg("interpret-trailers")
+        .arg("--no-in-place")
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    for contributor in contributors {
+        command.arg("--trailer").arg(format!(
+            "Co-authored-by: {} <{}>",
+            contributor.name, contributor.email
+        ));
+    }
+
+    let mut child = command
+        .spawn()
+        .context("failed to run git interpret-trailers")?;
+    let write_result = child
+        .stdin
+        .take()
+        .context("failed to open git interpret-trailers stdin")?
+        .write_all(message.as_bytes());
+    let output = child
+        .wait_with_output()
+        .context("failed to wait for git interpret-trailers")?;
+    write_result.context("failed to write commit message to git interpret-trailers")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+
+        if stderr.is_empty() {
+            bail!("could not prepare commit message");
+        }
+
+        bail!("could not prepare commit message: {stderr}");
+    }
+
+    String::from_utf8(output.stdout).context("git interpret-trailers returned invalid UTF-8")
+}
+
 impl ContributorGroup {
     fn add(&mut self, identity: Contributor) {
         let is_preferred = identity.commits > self.preferred_identity_commits
@@ -155,7 +223,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{Contributor, discover_contributors, inspect_head};
+    use super::{Contributor, discover_contributors, inspect_head, prepare_message, read_message};
 
     fn git(dir: &Path, args: &[&str]) -> String {
         let output = Command::new("git")
@@ -298,6 +366,65 @@ mod tests {
                 commits: 3,
             }]
         );
+    }
+
+    #[test]
+    fn reads_a_multiline_unicode_commit_message() {
+        let repo = init_repository();
+        commit_as(
+            repo.path(),
+            "Current Author",
+            "current@example.com",
+            "Subject\n\nBody with café.",
+        );
+        let oid = git(repo.path(), &["rev-parse", "HEAD"]);
+
+        let message = read_message(repo.path(), &oid).expect("message should be read");
+
+        assert_eq!(message, "Subject\n\nBody with café.\n");
+    }
+
+    #[test]
+    fn prepares_a_message_with_multiple_co_authors() {
+        let repo = init_repository();
+        commit_as(repo.path(), "Current Author", "current@example.com", "HEAD");
+        let old_head = git(repo.path(), &["rev-parse", "HEAD"]);
+        let alice = Contributor {
+            name: "Alice".to_owned(),
+            email: "alice@example.com".to_owned(),
+            commits: 2,
+        };
+        let bob = Contributor {
+            name: "Bob".to_owned(),
+            email: "bob@example.com".to_owned(),
+            commits: 1,
+        };
+        let message = "Handle Unicode\n\nPreserve café text.\n\nSigned-off-by: Maintainer <maintainer@example.com>\n";
+
+        let prepared = prepare_message(repo.path(), message, &[&alice, &bob])
+            .expect("message should be prepared");
+
+        assert_eq!(
+            prepared,
+            "Handle Unicode\n\nPreserve café text.\n\nSigned-off-by: Maintainer <maintainer@example.com>\nCo-authored-by: Alice <alice@example.com>\nCo-authored-by: Bob <bob@example.com>\n"
+        );
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), old_head);
+    }
+
+    #[test]
+    fn message_preparation_uses_gits_default_duplicate_handling() {
+        let repo = init_repository();
+        let alice = Contributor {
+            name: "Alice".to_owned(),
+            email: "alice@example.com".to_owned(),
+            commits: 1,
+        };
+        let message = "Subject\n\nCo-authored-by: Alice <alice@example.com>\n";
+
+        let prepared =
+            prepare_message(repo.path(), message, &[&alice]).expect("message should be prepared");
+
+        assert_eq!(prepared, message);
     }
 
     #[test]
