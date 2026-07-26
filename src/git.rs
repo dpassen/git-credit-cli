@@ -1,4 +1,4 @@
-use std::{path::Path, process::Command};
+use std::{collections::HashMap, path::Path, process::Command};
 
 use anyhow::{Context, bail};
 
@@ -6,6 +6,18 @@ use anyhow::{Context, bail};
 pub struct Head {
     pub branch: String,
     pub oid: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct Contributor {
+    pub name: String,
+    pub email: String,
+    pub commits: u64,
+}
+
+struct ContributorGroup {
+    contributor: Contributor,
+    preferred_identity_commits: u64,
 }
 
 fn git_stdout(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
@@ -57,13 +69,90 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<Head> {
     Ok(Head { branch, oid })
 }
 
+pub fn discover_contributors(dir: &Path) -> anyhow::Result<Vec<Contributor>> {
+    let output = git_stdout(
+        dir,
+        &["shortlog", "--summary", "--numbered", "--email", "--all"],
+        "could not discover contributors",
+    )?;
+
+    let mut groups: HashMap<String, ContributorGroup> = HashMap::new();
+    for identity in output.lines().filter_map(parse_shortlog_line) {
+        let normalized_email = identity.email.to_ascii_lowercase();
+        match groups.get_mut(&normalized_email) {
+            Some(group) => group.add(identity),
+            None => {
+                let preferred_identity_commits = identity.commits;
+                groups.insert(
+                    normalized_email,
+                    ContributorGroup {
+                        contributor: identity,
+                        preferred_identity_commits,
+                    },
+                );
+            }
+        }
+    }
+
+    let mut contributors: Vec<_> = groups
+        .into_values()
+        .map(|group| group.contributor)
+        .collect();
+    contributors.sort_by(contributor_order);
+    Ok(contributors)
+}
+
+impl ContributorGroup {
+    fn add(&mut self, identity: Contributor) {
+        let is_preferred = identity.commits > self.preferred_identity_commits
+            || (identity.commits == self.preferred_identity_commits
+                && (&identity.name, &identity.email)
+                    < (&self.contributor.name, &self.contributor.email));
+
+        self.contributor.commits += identity.commits;
+
+        if is_preferred {
+            self.contributor.name = identity.name;
+            self.contributor.email = identity.email;
+            self.preferred_identity_commits = identity.commits;
+        }
+    }
+}
+
+fn parse_shortlog_line(line: &str) -> Option<Contributor> {
+    let (commits, identity) = line.split_once('\t')?;
+    let commits = commits.trim().parse().ok()?;
+    let (name, email) = identity.rsplit_once(" <")?;
+    let email = email.strip_suffix('>')?;
+    let name = name.trim();
+    let email = email.trim();
+
+    if name.is_empty() || email.is_empty() {
+        return None;
+    }
+
+    Some(Contributor {
+        name: name.to_owned(),
+        email: email.to_owned(),
+        commits,
+    })
+}
+
+fn contributor_order(left: &Contributor, right: &Contributor) -> std::cmp::Ordering {
+    right
+        .commits
+        .cmp(&left.commits)
+        .then_with(|| left.name.cmp(&right.name))
+        .then_with(|| left.email.cmp(&right.email))
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::Path, process::Command};
 
     use tempfile::TempDir;
 
-    use super::inspect_head;
+    use super::{Contributor, discover_contributors, inspect_head};
 
     fn git(dir: &Path, args: &[&str]) -> String {
         let output = Command::new("git")
@@ -102,6 +191,24 @@ mod tests {
         git(dir, &["rev-parse", "HEAD"])
     }
 
+    fn commit_as(dir: &Path, name: &str, email: &str, message: &str) {
+        git(
+            dir,
+            &[
+                "-c",
+                &format!("user.name={name}"),
+                "-c",
+                &format!("user.email={email}"),
+                "commit",
+                "--allow-empty",
+                "--quiet",
+                "--no-verify",
+                "-m",
+                message,
+            ],
+        );
+    }
+
     #[test]
     fn inspects_head_from_a_subdirectory() {
         let repo = init_repository();
@@ -113,6 +220,76 @@ mod tests {
 
         assert_eq!(head.branch, "main");
         assert_eq!(head.oid, oid);
+    }
+
+    #[test]
+    fn discovers_contributors_by_commit_count() {
+        let repo = init_repository();
+        commit_as(repo.path(), "Alice", "alice@example.com", "One");
+        commit_as(repo.path(), "Bob", "bob@example.com", "Two");
+        commit_as(repo.path(), "Alice", "alice@example.com", "Three");
+
+        let contributors =
+            discover_contributors(repo.path()).expect("contributors should be discovered");
+
+        assert_eq!(
+            contributors,
+            vec![
+                Contributor {
+                    name: "Alice".to_owned(),
+                    email: "alice@example.com".to_owned(),
+                    commits: 2,
+                },
+                Contributor {
+                    name: "Bob".to_owned(),
+                    email: "bob@example.com".to_owned(),
+                    commits: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn contributor_discovery_honors_mailmap() {
+        let repo = init_repository();
+        commit_as(repo.path(), "Old Name", "old@example.com", "One");
+        fs::write(
+            repo.path().join(".mailmap"),
+            "Canonical Name <canonical@example.com> Old Name <old@example.com>\n",
+        )
+        .expect("mailmap should be written");
+
+        let contributors =
+            discover_contributors(repo.path()).expect("contributors should be discovered");
+
+        assert_eq!(
+            contributors,
+            vec![Contributor {
+                name: "Canonical Name".to_owned(),
+                email: "canonical@example.com".to_owned(),
+                commits: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn contributor_discovery_groups_normalized_emails() {
+        let repo = init_repository();
+        commit_as(repo.path(), "Alice", "ALICE@example.com", "One");
+        commit_as(repo.path(), "Alicia", "alice@example.com", "Two");
+        commit_as(repo.path(), "Alicia", "alice@example.com", "Three");
+
+        let contributors =
+            discover_contributors(repo.path()).expect("contributors should be discovered");
+
+        assert_eq!(
+            contributors,
+            vec![Contributor {
+                name: "Alicia".to_owned(),
+                email: "alice@example.com".to_owned(),
+                commits: 3,
+            }]
+        );
     }
 
     #[test]

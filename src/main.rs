@@ -15,7 +15,8 @@ fn main() -> anyhow::Result<()> {
 
     let cwd = std::env::current_dir()?;
     let head = git::inspect_head(&cwd)?;
+    let contributors = git::discover_contributors(&cwd)?;
 
-    dbg!(&head.branch, &head.oid);
+    dbg!(&head.branch, &head.oid, &contributors);
     Ok(())
 }
