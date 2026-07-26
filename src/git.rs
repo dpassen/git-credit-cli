@@ -8,6 +8,13 @@ use std::{
 use anyhow::{Context, bail};
 
 #[derive(Debug, Eq, PartialEq)]
+pub struct CommitInfo {
+    pub author_name: String,
+    pub author_email: String,
+    pub message: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct Contributor {
     pub name: String,
     pub email: String,
@@ -179,12 +186,33 @@ pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<C
     Ok(contributors)
 }
 
-pub fn read_message(dir: &Path, oid: &str) -> anyhow::Result<String> {
-    git_output(
+pub fn read_commit_info(dir: &Path, oid: &str) -> anyhow::Result<CommitInfo> {
+    let output = git_output(
         dir,
-        &["show", "--no-patch", "--format=format:%B", oid],
-        "could not read commit message",
-    )
+        &[
+            "show",
+            "--no-patch",
+            "--format=format:%aN%x00%aE%x00%B",
+            oid,
+        ],
+        "could not read commit information",
+    )?;
+    let mut fields = output.splitn(3, '\0');
+    let author_name = fields.next().unwrap_or_default();
+    let author_email = fields.next().unwrap_or_default();
+    let Some(message) = fields.next() else {
+        bail!("commit information is malformed");
+    };
+
+    if author_name.is_empty() || author_email.is_empty() {
+        bail!("commit information is malformed");
+    }
+
+    Ok(CommitInfo {
+        author_name: author_name.to_owned(),
+        author_email: author_email.to_owned(),
+        message: message.to_owned(),
+    })
 }
 
 pub fn prepare_message(
@@ -343,8 +371,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        Contributor, amend_head, discover_contributors, ensure_head_unchanged, ensure_safe_state,
-        inspect_head, prepare_message, read_message,
+        CommitInfo, Contributor, amend_head, discover_contributors, ensure_head_unchanged,
+        ensure_safe_state, inspect_head, prepare_message, read_commit_info,
     };
 
     fn git(dir: &Path, args: &[&str]) -> String {
@@ -573,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_a_multiline_unicode_commit_message() {
+    fn reads_mailmapped_author_and_multiline_unicode_message() {
         let repo = init_repository();
         commit_as(
             repo.path(),
@@ -582,10 +610,22 @@ mod tests {
             "Subject\n\nBody with café.",
         );
         let oid = git(repo.path(), &["rev-parse", "HEAD"]);
+        fs::write(
+            repo.path().join(".mailmap"),
+            "Canonical Author <canonical@example.com> Current Author <current@example.com>\n",
+        )
+        .expect("mailmap should be written");
 
-        let message = read_message(repo.path(), &oid).expect("message should be read");
+        let info = read_commit_info(repo.path(), &oid).expect("commit information should be read");
 
-        assert_eq!(message, "Subject\n\nBody with café.\n");
+        assert_eq!(
+            info,
+            CommitInfo {
+                author_name: "Canonical Author".to_owned(),
+                author_email: "canonical@example.com".to_owned(),
+                message: "Subject\n\nBody with café.\n".to_owned(),
+            }
+        );
     }
 
     #[test]
@@ -666,7 +706,10 @@ mod tests {
             git(repo.path(), &["show", "-s", "--format=%an <%ae>", "HEAD"]),
             old_author
         );
-        assert_eq!(read_message(repo.path(), &new_oid).unwrap(), message);
+        assert_eq!(
+            read_commit_info(repo.path(), &new_oid).unwrap().message,
+            message
+        );
         assert_eq!(
             fs::read_to_string(repo.path().join("file.txt")).unwrap(),
             "unstaged contents\n"

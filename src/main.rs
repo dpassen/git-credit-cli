@@ -23,7 +23,8 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("no usable contributors found");
     }
 
-    let Some(selected) = tui::run(&contributors)? else {
+    let commit = git::read_commit_info(&cwd, &head_oid)?;
+    let Some(selected) = tui::run(&contributors, &head_oid, &commit)? else {
         return Ok(());
     };
 
@@ -33,12 +34,11 @@ fn main() -> anyhow::Result<()> {
 
     git::ensure_head_unchanged(&cwd, &head_oid)?;
     git::ensure_safe_state(&cwd, &head_oid)?;
-    let message = git::read_message(&cwd, &head_oid)?;
     let selected_contributors: Vec<_> = selected
         .into_iter()
         .map(|index| &contributors[index])
         .collect();
-    let prepared = git::prepare_message(&cwd, &message, &selected_contributors)?;
+    let prepared = git::prepare_message(&cwd, &commit.message, &selected_contributors)?;
     let new_oid = git::amend_head(&cwd, &prepared)?;
     let count = selected_contributors.len();
     let label = if count == 1 {
