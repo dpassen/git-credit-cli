@@ -13,4 +13,5 @@ nucleo-matcher = "0.3.1"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 
 [dev-dependencies]
+insta = "1.48.0"
 tempfile = "3.27.0"
