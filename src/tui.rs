@@ -1,4 +1,7 @@
-use std::io::{IsTerminal, stdin, stdout};
+use std::{
+    collections::BTreeSet,
+    io::{IsTerminal, stdin, stdout},
+};
 
 use anyhow::{Context, bail};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
@@ -50,6 +53,7 @@ struct Picker {
     query: String,
     matches: Vec<usize>,
     cursor: usize,
+    selected: BTreeSet<usize>,
     matcher: Matcher,
 }
 
@@ -59,6 +63,7 @@ impl Picker {
             query: String::new(),
             matches: Vec::new(),
             cursor: 0,
+            selected: BTreeSet::new(),
             matcher: Matcher::new(Config::DEFAULT),
         };
         picker.refilter(contributors);
@@ -73,6 +78,13 @@ impl Picker {
             KeyCode::Backspace => {
                 self.query.pop();
                 self.refilter(contributors);
+            }
+            KeyCode::Char(' ')
+                if !key.modifiers.intersects(
+                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                ) =>
+            {
+                self.toggle_selected();
             }
             KeyCode::Char(character)
                 if !key.modifiers.intersects(
@@ -95,6 +107,16 @@ impl Picker {
     fn move_down(&mut self) {
         if self.cursor + 1 < self.matches.len() {
             self.cursor += 1;
+        }
+    }
+
+    fn toggle_selected(&mut self) {
+        let Some(index) = self.matches.get(self.cursor).copied() else {
+            return;
+        };
+
+        if !self.selected.remove(&index) {
+            self.selected.insert(index);
         }
     }
 
@@ -146,8 +168,13 @@ impl Picker {
 
         let items = self.matches.iter().map(|index| {
             let contributor = &contributors[*index];
+            let marker = if self.selected.contains(index) {
+                "[x]"
+            } else {
+                "[ ]"
+            };
             ListItem::new(format!(
-                "{} <{}>  {} commits",
+                "{marker} {} <{}>  {} commits",
                 contributor.name, contributor.email, contributor.commits
             ))
         });
@@ -163,7 +190,10 @@ impl Picker {
             ListState::default().with_selected((!self.matches.is_empty()).then_some(self.cursor));
         frame.render_stateful_widget(list, list_area, &mut list_state);
 
-        frame.render_widget(Paragraph::new("↑/↓ move  Esc close"), help_area);
+        frame.render_widget(
+            Paragraph::new("↑/↓ move  Space select  Esc close"),
+            help_area,
+        );
     }
 }
 
@@ -224,6 +254,20 @@ mod tests {
         picker.refilter(&contributors);
 
         assert_eq!(picker.matches, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn selections_survive_filter_changes() {
+        let contributors = contributors();
+        let mut picker = Picker::new(&contributors);
+        picker.toggle_selected();
+
+        for character in "work".chars() {
+            type_character(&mut picker, character, &contributors);
+        }
+        picker.toggle_selected();
+
+        assert_eq!(picker.selected.into_iter().collect::<Vec<_>>(), vec![0, 2]);
     }
 
     #[test]
