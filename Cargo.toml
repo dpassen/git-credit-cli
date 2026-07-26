@@ -1,5 +1,5 @@
 [package]
-name = "git-credit"
+name = "git-credit-cli"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
@@ -7,6 +7,12 @@ license = "MIT OR Apache-2.0"
 description = "CLI for safely adding Co-authored-by trailers to your latest Git commit"
 readme = "README.md"
 repository = "https://github.com/dpassen/git-credit-cli"
+keywords = ["git", "cli", "co-authored-by", "commit", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "git-credit"
+path = "src/main.rs"
 
 [lints.rust]
 unsafe_code = "forbid"
