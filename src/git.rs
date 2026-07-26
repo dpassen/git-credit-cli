@@ -2,11 +2,6 @@ use std::{collections::HashMap, path::Path, process::Command};
 
 use anyhow::{Context, bail};
 
-#[derive(Debug)]
-pub struct Head {
-    pub oid: String,
-}
-
 #[derive(Debug, Eq, PartialEq)]
 pub struct Contributor {
     pub name: String,
@@ -42,7 +37,7 @@ fn git_stdout(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String
         .map(|stdout| stdout.trim().to_owned())
 }
 
-pub fn inspect_head(dir: &Path) -> anyhow::Result<Head> {
+pub fn inspect_head(dir: &Path) -> anyhow::Result<String> {
     let inside_work_tree = git_stdout(
         dir,
         &["rev-parse", "--is-inside-work-tree"],
@@ -65,13 +60,13 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<Head> {
         "could not resolve HEAD to a commit",
     )?;
 
-    Ok(Head { oid })
+    Ok(oid)
 }
 
-pub fn discover_contributors(dir: &Path, head: &Head) -> anyhow::Result<Vec<Contributor>> {
+pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<Contributor>> {
     let head_author_email = git_stdout(
         dir,
-        &["show", "--no-patch", "--format=%aE", head.oid.as_str()],
+        &["show", "--no-patch", "--format=%aE", head_oid],
         "could not read HEAD author",
     )?;
     let output = git_stdout(
@@ -226,7 +221,7 @@ mod tests {
 
         let head = inspect_head(&subdirectory).expect("HEAD should be inspected");
 
-        assert_eq!(head.oid, oid);
+        assert_eq!(head, oid);
     }
 
     #[test]
