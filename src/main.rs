@@ -31,6 +31,8 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    git::ensure_head_unchanged(&cwd, &head_oid)?;
+    git::ensure_safe_state(&cwd, &head_oid)?;
     let message = git::read_message(&cwd, &head_oid)?;
     let selected_contributors: Vec<_> = selected
         .into_iter()

@@ -71,6 +71,20 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<String> {
     Ok(oid)
 }
 
+pub fn ensure_head_unchanged(dir: &Path, expected_oid: &str) -> anyhow::Result<()> {
+    let current_oid = git_stdout(
+        dir,
+        &["rev-parse", "--verify", "HEAD^{commit}"],
+        "HEAD changed while picker was open",
+    )?;
+
+    if current_oid != expected_oid {
+        bail!("HEAD changed while picker was open");
+    }
+
+    Ok(())
+}
+
 pub fn ensure_safe_state(dir: &Path, head_oid: &str) -> anyhow::Result<()> {
     const OPERATION_MARKERS: [&str; 6] = [
         "MERGE_HEAD",
@@ -280,8 +294,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        Contributor, discover_contributors, ensure_safe_state, inspect_head, prepare_message,
-        read_message,
+        Contributor, discover_contributors, ensure_head_unchanged, ensure_safe_state, inspect_head,
+        prepare_message, read_message,
     };
 
     fn git(dir: &Path, args: &[&str]) -> String {
@@ -425,6 +439,23 @@ mod tests {
                 commits: 3,
             }]
         );
+    }
+
+    #[test]
+    fn rejects_a_changed_head() {
+        let repo = init_repository();
+        let old_oid = commit_file(repo.path());
+        commit_as(
+            repo.path(),
+            "Current Author",
+            "current@example.com",
+            "New HEAD",
+        );
+
+        let error = ensure_head_unchanged(repo.path(), &old_oid)
+            .expect_err("changed HEAD should be rejected");
+
+        assert_eq!(error.to_string(), "HEAD changed while picker was open");
     }
 
     #[test]
