@@ -18,7 +18,7 @@ use ratatui::{
 
 use crate::git::Contributor;
 
-pub fn run(contributors: &[Contributor]) -> anyhow::Result<()> {
+pub fn run(contributors: &[Contributor]) -> anyhow::Result<Option<Vec<usize>>> {
     if !stdin().is_terminal() || !stdout().is_terminal() {
         bail!("git-credit requires an interactive terminal");
     }
@@ -32,7 +32,7 @@ pub fn run(contributors: &[Contributor]) -> anyhow::Result<()> {
 fn run_list(
     terminal: &mut ratatui::DefaultTerminal,
     contributors: &[Contributor],
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<Vec<usize>>> {
     let mut picker = Picker::new(contributors);
 
     loop {
@@ -43,8 +43,10 @@ fn run_list(
             continue;
         };
 
-        if picker.handle_key(key, contributors) {
-            return Ok(());
+        match picker.handle_key(key, contributors) {
+            Action::Continue => {}
+            Action::Confirm => return Ok(Some(picker.selected_indices())),
+            Action::Cancel => return Ok(None),
         }
     }
 }
@@ -70,9 +72,10 @@ impl Picker {
         picker
     }
 
-    fn handle_key(&mut self, key: KeyEvent, contributors: &[Contributor]) -> bool {
+    fn handle_key(&mut self, key: KeyEvent, contributors: &[Contributor]) -> Action {
         match key.code {
-            KeyCode::Esc => return true,
+            KeyCode::Esc => return Action::Cancel,
+            KeyCode::Enter => return Action::Confirm,
             KeyCode::Up => self.move_up(),
             KeyCode::Down => self.move_down(),
             KeyCode::Backspace => {
@@ -97,7 +100,7 @@ impl Picker {
             _ => {}
         }
 
-        false
+        Action::Continue
     }
 
     fn move_up(&mut self) {
@@ -118,6 +121,10 @@ impl Picker {
         if !self.selected.remove(&index) {
             self.selected.insert(index);
         }
+    }
+
+    fn selected_indices(&self) -> Vec<usize> {
+        self.selected.iter().copied().collect()
     }
 
     fn refilter(&mut self, contributors: &[Contributor]) {
@@ -191,17 +198,24 @@ impl Picker {
         frame.render_stateful_widget(list, list_area, &mut list_state);
 
         frame.render_widget(
-            Paragraph::new("↑/↓ move  Space select  Esc close"),
+            Paragraph::new("↑/↓ move  Space select  Enter continue  Esc cancel"),
             help_area,
         );
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Action {
+    Continue,
+    Confirm,
+    Cancel,
 }
 
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    use super::Picker;
+    use super::{Action, Picker};
     use crate::git::Contributor;
 
     fn contributors() -> Vec<Contributor> {
@@ -225,11 +239,11 @@ mod tests {
     }
 
     fn type_character(picker: &mut Picker, character: char, contributors: &[Contributor]) {
-        let should_exit = picker.handle_key(
+        let action = picker.handle_key(
             KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
             contributors,
         );
-        assert!(!should_exit);
+        assert_eq!(action, Action::Continue);
     }
 
     #[test]
@@ -268,6 +282,34 @@ mod tests {
         picker.toggle_selected();
 
         assert_eq!(picker.selected.into_iter().collect::<Vec<_>>(), vec![0, 2]);
+    }
+
+    #[test]
+    fn enter_confirms_the_selection() {
+        let contributors = contributors();
+        let mut picker = Picker::new(&contributors);
+        picker.toggle_selected();
+
+        let action = picker.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &contributors,
+        );
+
+        assert_eq!(action, Action::Confirm);
+        assert_eq!(picker.selected_indices(), vec![0]);
+    }
+
+    #[test]
+    fn escape_cancels() {
+        let contributors = contributors();
+        let mut picker = Picker::new(&contributors);
+
+        let action = picker.handle_key(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &contributors,
+        );
+
+        assert_eq!(action, Action::Cancel);
     }
 
     #[test]

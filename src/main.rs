@@ -22,5 +22,14 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("no usable contributors found");
     }
 
-    tui::run(&contributors)
+    let Some(selected) = tui::run(&contributors)? else {
+        return Ok(());
+    };
+
+    for index in selected {
+        let contributor = &contributors[index];
+        println!("{} <{}>", contributor.name, contributor.email);
+    }
+
+    Ok(())
 }
