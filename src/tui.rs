@@ -13,18 +13,22 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout},
     style::{Modifier, Style},
-    widgets::{Block, List, ListItem, ListState, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::git::Contributor;
+use crate::git::{CommitInfo, Contributor};
 
-pub fn run(contributors: &[Contributor]) -> anyhow::Result<Option<Vec<usize>>> {
+pub fn run(
+    contributors: &[Contributor],
+    head_oid: &str,
+    commit: &CommitInfo,
+) -> anyhow::Result<Option<Vec<usize>>> {
     if !stdin().is_terminal() || !stdout().is_terminal() {
         bail!("git-credit requires an interactive terminal");
     }
 
     let mut terminal = ratatui::try_init().context("failed to initialize terminal")?;
-    let result = run_list(&mut terminal, contributors);
+    let result = run_list(&mut terminal, contributors, head_oid, commit);
     ratatui::try_restore().context("failed to restore terminal")?;
     result
 }
@@ -32,11 +36,13 @@ pub fn run(contributors: &[Contributor]) -> anyhow::Result<Option<Vec<usize>>> {
 fn run_list(
     terminal: &mut ratatui::DefaultTerminal,
     contributors: &[Contributor],
+    head_oid: &str,
+    commit: &CommitInfo,
 ) -> anyhow::Result<Option<Vec<usize>>> {
     let mut picker = Picker::new(contributors);
 
     loop {
-        terminal.draw(|frame| picker.render(frame, contributors))?;
+        terminal.draw(|frame| picker.render(frame, contributors, head_oid, commit))?;
 
         let event = event::read().context("failed to read terminal input")?;
         let Some(key) = event.as_key_press_event() else {
@@ -182,20 +188,50 @@ impl Picker {
         self.matches = matches.into_iter().map(|(index, _)| index).collect();
     }
 
-    fn render(&self, frame: &mut Frame, contributors: &[Contributor]) {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        contributors: &[Contributor],
+        head_oid: &str,
+        commit: &CommitInfo,
+    ) {
         match self.view {
-            View::Picker => self.render_picker(frame, contributors),
+            View::Picker => self.render_picker(frame, contributors, head_oid, commit),
             View::Confirmation => self.render_confirmation(frame, contributors),
         }
     }
 
-    fn render_picker(&self, frame: &mut Frame, contributors: &[Contributor]) {
-        let [search_area, list_area, help_area] = Layout::vertical([
+    fn render_picker(
+        &self,
+        frame: &mut Frame,
+        contributors: &[Contributor],
+        head_oid: &str,
+        commit: &CommitInfo,
+    ) {
+        let message_height = frame.area().height.saturating_sub(8).min(8);
+        let [header_area, message_area, search_area, list_area, help_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(message_height),
             Constraint::Length(3),
             Constraint::Min(1),
             Constraint::Length(1),
         ])
         .areas(frame.area());
+
+        let abbreviated_oid = head_oid.get(..8).unwrap_or(head_oid);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "HEAD {abbreviated_oid}  Author: {} <{}>",
+                commit.author_name, commit.author_email
+            )),
+            header_area,
+        );
+        frame.render_widget(
+            Paragraph::new(commit.message.as_str())
+                .block(Block::bordered().title(" Commit message "))
+                .wrap(Wrap { trim: false }),
+            message_area,
+        );
 
         let search = Paragraph::new(format!("{}▏", self.query))
             .block(Block::bordered().title(" Search contributors "));
