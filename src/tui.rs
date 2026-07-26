@@ -305,9 +305,10 @@ enum Action {
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
 
     use super::{Action, Picker, View};
-    use crate::git::Contributor;
+    use crate::git::{CommitInfo, Contributor};
 
     fn contributors() -> Vec<Contributor> {
         vec![
@@ -329,12 +330,59 @@ mod tests {
         ]
     }
 
+    fn commit_info() -> CommitInfo {
+        CommitInfo {
+            author_name: "Current Author".to_owned(),
+            author_email: "current@example.com".to_owned(),
+            message:
+                "Improve contributor selection\n\nShow commit context before choosing co-authors.\n"
+                    .to_owned(),
+        }
+    }
+
+    fn render(picker: &Picker, contributors: &[Contributor]) -> String {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let commit = commit_info();
+        terminal
+            .draw(|frame| {
+                picker.render(
+                    frame,
+                    contributors,
+                    "0123456789abcdef0123456789abcdef01234567",
+                    &commit,
+                );
+            })
+            .unwrap();
+        terminal.backend().to_string()
+    }
+
     fn type_character(picker: &mut Picker, character: char, contributors: &[Contributor]) {
         let action = picker.handle_key(
             KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
             contributors,
         );
         assert_eq!(action, Action::Continue);
+    }
+
+    #[test]
+    fn renders_the_default_picker() {
+        let contributors = contributors();
+        let picker = Picker::new(&contributors);
+
+        insta::assert_snapshot!(render(&picker, &contributors));
+    }
+
+    #[test]
+    fn renders_confirmation() {
+        let contributors = contributors();
+        let mut picker = Picker::new(&contributors);
+        picker.toggle_selected();
+        picker.move_down();
+        picker.toggle_selected();
+        picker.view = View::Confirmation;
+
+        insta::assert_snapshot!(render(&picker, &contributors));
     }
 
     #[test]
