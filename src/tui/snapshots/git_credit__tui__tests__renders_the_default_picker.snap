@@ -1,5 +1,5 @@
 ---
-source: src/tui.rs
+source: src/tui/tests.rs
 expression: "render(&picker, &contributors)"
 ---
 "HEAD 01234567  Author: Current Author <current@example.com>                     "

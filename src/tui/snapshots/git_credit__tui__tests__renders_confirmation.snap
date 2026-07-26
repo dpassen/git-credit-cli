@@ -1,5 +1,5 @@
 ---
-source: src/tui.rs
+source: src/tui/tests.rs
 expression: "render(&picker, &contributors)"
 ---
 "┌ Confirm co-authors ──────────────────────────────────────────────────────────┐"
