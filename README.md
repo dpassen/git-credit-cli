@@ -1,5 +1,7 @@
 # git-credit
 
+![git-credit banner](https://raw.githubusercontent.com/dpassen/git-credit-cli/main/assets/git-credit-banner.svg)
+
 [![test](https://github.com/dpassen/git-credit-cli/actions/workflows/test.yaml/badge.svg)](https://github.com/dpassen/git-credit-cli/actions/workflows/test.yaml)
 [![lint](https://github.com/dpassen/git-credit-cli/actions/workflows/lint.yaml/badge.svg)](https://github.com/dpassen/git-credit-cli/actions/workflows/lint.yaml)
 [![format](https://github.com/dpassen/git-credit-cli/actions/workflows/format.yaml/badge.svg)](https://github.com/dpassen/git-credit-cli/actions/workflows/format.yaml)
