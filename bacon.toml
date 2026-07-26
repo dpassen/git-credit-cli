@@ -4,7 +4,7 @@
 command = ['cargo', 'check', '--all-targets']
 
 [jobs.clippy]
-command = ['cargo', 'clippy', '--all-targets']
+command = ['cargo', 'clippy', '--all-targets', '--', '-D', 'warnings']
 
 [jobs.test]
 command = ['cargo', 'test']
