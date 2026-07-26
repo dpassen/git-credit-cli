@@ -1,4 +1,5 @@
 mod git;
+mod tui;
 
 use clap::Parser;
 
@@ -17,6 +18,9 @@ fn main() -> anyhow::Result<()> {
     let head = git::inspect_head(&cwd)?;
     let contributors = git::discover_contributors(&cwd, &head)?;
 
-    dbg!(&head.branch, &head.oid, &contributors);
-    Ok(())
+    if contributors.is_empty() {
+        anyhow::bail!("no usable contributors found");
+    }
+
+    tui::run(&contributors)
 }
