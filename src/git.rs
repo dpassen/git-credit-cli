@@ -69,7 +69,12 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<Head> {
     Ok(Head { branch, oid })
 }
 
-pub fn discover_contributors(dir: &Path) -> anyhow::Result<Vec<Contributor>> {
+pub fn discover_contributors(dir: &Path, head: &Head) -> anyhow::Result<Vec<Contributor>> {
+    let head_author_email = git_stdout(
+        dir,
+        &["show", "--no-patch", "--format=%aE", head.oid.as_str()],
+        "could not read HEAD author",
+    )?;
     let output = git_stdout(
         dir,
         &["shortlog", "--summary", "--numbered", "--email", "--all"],
@@ -77,7 +82,11 @@ pub fn discover_contributors(dir: &Path) -> anyhow::Result<Vec<Contributor>> {
     )?;
 
     let mut groups: HashMap<String, ContributorGroup> = HashMap::new();
-    for identity in output.lines().filter_map(parse_shortlog_line) {
+    for identity in output
+        .lines()
+        .filter_map(parse_shortlog_line)
+        .filter(|identity| !identity.email.eq_ignore_ascii_case(&head_author_email))
+    {
         let normalized_email = identity.email.to_ascii_lowercase();
         match groups.get_mut(&normalized_email) {
             Some(group) => group.add(identity),
@@ -228,9 +237,11 @@ mod tests {
         commit_as(repo.path(), "Alice", "alice@example.com", "One");
         commit_as(repo.path(), "Bob", "bob@example.com", "Two");
         commit_as(repo.path(), "Alice", "alice@example.com", "Three");
+        commit_as(repo.path(), "Current Author", "current@example.com", "HEAD");
+        let head = inspect_head(repo.path()).expect("HEAD should be inspected");
 
         let contributors =
-            discover_contributors(repo.path()).expect("contributors should be discovered");
+            discover_contributors(repo.path(), &head).expect("contributors should be discovered");
 
         assert_eq!(
             contributors,
@@ -253,14 +264,16 @@ mod tests {
     fn contributor_discovery_honors_mailmap() {
         let repo = init_repository();
         commit_as(repo.path(), "Old Name", "old@example.com", "One");
+        commit_as(repo.path(), "Current Author", "current@example.com", "HEAD");
         fs::write(
             repo.path().join(".mailmap"),
             "Canonical Name <canonical@example.com> Old Name <old@example.com>\n",
         )
         .expect("mailmap should be written");
 
+        let head = inspect_head(repo.path()).expect("HEAD should be inspected");
         let contributors =
-            discover_contributors(repo.path()).expect("contributors should be discovered");
+            discover_contributors(repo.path(), &head).expect("contributors should be discovered");
 
         assert_eq!(
             contributors,
@@ -278,9 +291,11 @@ mod tests {
         commit_as(repo.path(), "Alice", "ALICE@example.com", "One");
         commit_as(repo.path(), "Alicia", "alice@example.com", "Two");
         commit_as(repo.path(), "Alicia", "alice@example.com", "Three");
+        commit_as(repo.path(), "Current Author", "current@example.com", "HEAD");
+        let head = inspect_head(repo.path()).expect("HEAD should be inspected");
 
         let contributors =
-            discover_contributors(repo.path()).expect("contributors should be discovered");
+            discover_contributors(repo.path(), &head).expect("contributors should be discovered");
 
         assert_eq!(
             contributors,
