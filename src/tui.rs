@@ -19,11 +19,11 @@ use ratatui::{
 
 use crate::git::{CommitInfo, Contributor};
 
-pub fn run(
-    contributors: &[Contributor],
+pub fn run<'a>(
+    contributors: &'a [Contributor],
     head_oid: &str,
     commit: &CommitInfo,
-) -> anyhow::Result<Option<Vec<usize>>> {
+) -> anyhow::Result<Option<Vec<&'a Contributor>>> {
     if !stdin().is_terminal() || !stdout().is_terminal() {
         bail!("git-credit requires an interactive terminal");
     }
@@ -34,31 +34,32 @@ pub fn run(
     result
 }
 
-fn run_list(
+fn run_list<'a>(
     terminal: &mut ratatui::DefaultTerminal,
-    contributors: &[Contributor],
+    contributors: &'a [Contributor],
     head_oid: &str,
     commit: &CommitInfo,
-) -> anyhow::Result<Option<Vec<usize>>> {
+) -> anyhow::Result<Option<Vec<&'a Contributor>>> {
     let mut picker = Picker::new(contributors);
 
     loop {
-        terminal.draw(|frame| picker.render(frame, contributors, head_oid, commit))?;
+        terminal.draw(|frame| picker.render(frame, head_oid, commit))?;
 
         let event = event::read().context("failed to read terminal input")?;
         let Some(key) = event.as_key_press_event() else {
             continue;
         };
 
-        match picker.handle_key(key, contributors) {
+        match picker.handle_key(key) {
             Action::Continue => {}
-            Action::Confirm => return Ok(Some(picker.selected_indices())),
+            Action::Confirm => return Ok(Some(picker.selected_contributors())),
             Action::Cancel => return Ok(None),
         }
     }
 }
 
-struct Picker {
+struct Picker<'a> {
+    contributors: &'a [Contributor],
     view: View,
     query: String,
     matches: Vec<usize>,
@@ -70,9 +71,10 @@ struct Picker {
     utf32_buffer: Vec<char>,
 }
 
-impl Picker {
-    fn new(contributors: &[Contributor]) -> Self {
+impl<'a> Picker<'a> {
+    fn new(contributors: &'a [Contributor]) -> Self {
         let mut picker = Self {
+            contributors,
             view: View::Picker,
             query: String::new(),
             matches: Vec::new(),
@@ -83,18 +85,18 @@ impl Picker {
             identity_buffer: String::new(),
             utf32_buffer: Vec::new(),
         };
-        picker.refilter(contributors);
+        picker.refilter();
         picker
     }
 
-    fn handle_key(&mut self, key: KeyEvent, contributors: &[Contributor]) -> Action {
+    fn handle_key(&mut self, key: KeyEvent) -> Action {
         match self.view {
-            View::Picker => self.handle_picker_key(key, contributors),
+            View::Picker => self.handle_picker_key(key),
             View::Confirmation => self.handle_confirmation_key(key),
         }
     }
 
-    fn handle_picker_key(&mut self, key: KeyEvent, contributors: &[Contributor]) -> Action {
+    fn handle_picker_key(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc => return Action::Cancel,
             KeyCode::Enter if self.selected.is_empty() => return Action::Confirm,
@@ -103,7 +105,7 @@ impl Picker {
             KeyCode::Down => self.move_down(),
             KeyCode::Backspace => {
                 self.query.pop();
-                self.refilter(contributors);
+                self.refilter();
             }
             KeyCode::Char(' ')
                 if !key.modifiers.intersects(
@@ -118,7 +120,7 @@ impl Picker {
                 ) =>
             {
                 self.query.push(character);
-                self.refilter(contributors);
+                self.refilter();
             }
             _ => {}
         }
@@ -157,17 +159,20 @@ impl Picker {
         }
     }
 
-    fn selected_indices(&self) -> Vec<usize> {
-        self.selected.iter().copied().collect()
+    fn selected_contributors(&self) -> Vec<&'a Contributor> {
+        self.selected
+            .iter()
+            .map(|&index| &self.contributors[index])
+            .collect()
     }
 
-    fn refilter(&mut self, contributors: &[Contributor]) {
+    fn refilter(&mut self) {
         self.cursor = 0;
         self.matches.clear();
         self.match_scores.clear();
 
         if self.query.is_empty() {
-            self.matches.extend(0..contributors.len());
+            self.matches.extend(0..self.contributors.len());
             return;
         }
 
@@ -177,7 +182,7 @@ impl Picker {
             Normalization::Smart,
             AtomKind::Fuzzy,
         );
-        for (index, contributor) in contributors.iter().enumerate() {
+        for (index, contributor) in self.contributors.iter().enumerate() {
             self.identity_buffer.clear();
             self.identity_buffer.push_str(&contributor.name);
             self.identity_buffer.push_str(" <");
@@ -202,26 +207,14 @@ impl Picker {
             .extend(self.match_scores.iter().map(|(index, _)| index));
     }
 
-    fn render(
-        &self,
-        frame: &mut Frame,
-        contributors: &[Contributor],
-        head_oid: &str,
-        commit: &CommitInfo,
-    ) {
+    fn render(&self, frame: &mut Frame, head_oid: &str, commit: &CommitInfo) {
         match self.view {
-            View::Picker => self.render_picker(frame, contributors, head_oid, commit),
-            View::Confirmation => self.render_confirmation(frame, contributors),
+            View::Picker => self.render_picker(frame, head_oid, commit),
+            View::Confirmation => self.render_confirmation(frame),
         }
     }
 
-    fn render_picker(
-        &self,
-        frame: &mut Frame,
-        contributors: &[Contributor],
-        head_oid: &str,
-        commit: &CommitInfo,
-    ) {
+    fn render_picker(&self, frame: &mut Frame, head_oid: &str, commit: &CommitInfo) {
         let message_height = frame.area().height.saturating_sub(8).min(8);
         let [header_area, message_area, search_area, list_area, help_area] = Layout::vertical([
             Constraint::Length(1),
@@ -252,7 +245,7 @@ impl Picker {
         frame.render_widget(search, search_area);
 
         let items = self.matches.iter().map(|index| {
-            let contributor = &contributors[*index];
+            let contributor = &self.contributors[*index];
             let marker = if self.selected.contains(index) {
                 "[x]"
             } else {
@@ -267,7 +260,7 @@ impl Picker {
             .block(Block::bordered().title(format!(
                 " Contributors ({}/{}) ",
                 self.matches.len(),
-                contributors.len()
+                self.contributors.len()
             )))
             .highlight_symbol("› ")
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED));
@@ -281,13 +274,13 @@ impl Picker {
         );
     }
 
-    fn render_confirmation(&self, frame: &mut Frame, contributors: &[Contributor]) {
+    fn render_confirmation(&self, frame: &mut Frame) {
         let [body_area, help_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
 
         let mut body = String::from("Add these co-authors to HEAD?\n\n");
         for index in &self.selected {
-            let contributor = &contributors[*index];
+            let contributor = &self.contributors[*index];
             writeln!(
                 body,
                 "Co-authored-by: {} <{}>",
