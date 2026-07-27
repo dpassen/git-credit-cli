@@ -9,7 +9,7 @@ use clap::Parser;
     version,
     about = "Easily add 'Co-authored-by' trailers to HEAD"
 )]
-struct Args {}
+struct Args;
 
 fn main() -> anyhow::Result<()> {
     Args::parse();
