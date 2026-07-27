@@ -24,20 +24,16 @@ fn main() -> anyhow::Result<()> {
     }
 
     let commit = git::read_commit_info(&cwd, &head_oid)?;
-    let Some(selected) = tui::run(&contributors, &head_oid, &commit)? else {
+    let Some(selected_contributors) = tui::run(&contributors, &head_oid, &commit)? else {
         return Ok(());
     };
 
-    if selected.is_empty() {
+    if selected_contributors.is_empty() {
         return Ok(());
     }
 
     git::ensure_head_unchanged(&cwd, &head_oid)?;
     git::ensure_safe_state(&cwd, &head_oid)?;
-    let selected_contributors: Vec<_> = selected
-        .into_iter()
-        .map(|index| &contributors[index])
-        .collect();
     let prepared = git::prepare_message(&cwd, &commit.message, &selected_contributors)?;
     let new_oid = git::amend_head(&cwd, &prepared)?;
     let count = selected_contributors.len();

@@ -34,28 +34,20 @@ fn commit_info() -> CommitInfo {
     }
 }
 
-fn render(picker: &Picker, contributors: &[Contributor]) -> String {
+fn render(picker: &Picker<'_>) -> String {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let commit = commit_info();
     terminal
         .draw(|frame| {
-            picker.render(
-                frame,
-                contributors,
-                "0123456789abcdef0123456789abcdef01234567",
-                &commit,
-            );
+            picker.render(frame, "0123456789abcdef0123456789abcdef01234567", &commit);
         })
         .unwrap();
     terminal.backend().to_string()
 }
 
-fn type_character(picker: &mut Picker, character: char, contributors: &[Contributor]) {
-    let action = picker.handle_key(
-        KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
-        contributors,
-    );
+fn type_character(picker: &mut Picker<'_>, character: char) {
+    let action = picker.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
     assert_eq!(action, Action::Continue);
 }
 
@@ -64,7 +56,7 @@ fn renders_the_default_picker() {
     let contributors = contributors();
     let picker = Picker::new(&contributors);
 
-    insta::assert_snapshot!(render(&picker, &contributors));
+    insta::assert_snapshot!(render(&picker));
 }
 
 #[test]
@@ -76,7 +68,7 @@ fn renders_confirmation() {
     picker.toggle_selected();
     picker.view = View::Confirmation;
 
-    insta::assert_snapshot!(render(&picker, &contributors));
+    insta::assert_snapshot!(render(&picker));
 }
 
 #[test]
@@ -85,7 +77,7 @@ fn fuzzy_filters_names_and_emails() {
     let mut picker = Picker::new(&contributors);
 
     for character in "work".chars() {
-        type_character(&mut picker, character, &contributors);
+        type_character(&mut picker, character);
     }
 
     assert_eq!(picker.matches, vec![2]);
@@ -95,10 +87,10 @@ fn fuzzy_filters_names_and_emails() {
 fn clearing_the_query_restores_default_order() {
     let contributors = contributors();
     let mut picker = Picker::new(&contributors);
-    type_character(&mut picker, 'b', &contributors);
+    type_character(&mut picker, 'b');
 
     picker.query.clear();
-    picker.refilter(&contributors);
+    picker.refilter();
 
     assert_eq!(picker.matches, vec![0, 1, 2]);
 }
@@ -110,7 +102,7 @@ fn selections_survive_filter_changes() {
     picker.toggle_selected();
 
     for character in "work".chars() {
-        type_character(&mut picker, character, &contributors);
+        type_character(&mut picker, character);
     }
     picker.toggle_selected();
 
@@ -123,10 +115,7 @@ fn enter_with_selections_opens_confirmation() {
     let mut picker = Picker::new(&contributors);
     picker.toggle_selected();
 
-    let action = picker.handle_key(
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        &contributors,
-    );
+    let action = picker.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert_eq!(action, Action::Continue);
     assert_eq!(picker.view, View::Confirmation);
@@ -138,10 +127,7 @@ fn escape_from_confirmation_returns_to_picker() {
     let mut picker = Picker::new(&contributors);
     picker.view = View::Confirmation;
 
-    let action = picker.handle_key(
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-        &contributors,
-    );
+    let action = picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
     assert_eq!(action, Action::Continue);
     assert_eq!(picker.view, View::Picker);
@@ -154,13 +140,10 @@ fn enter_on_confirmation_confirms_the_selection() {
     picker.toggle_selected();
     picker.view = View::Confirmation;
 
-    let action = picker.handle_key(
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        &contributors,
-    );
+    let action = picker.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert_eq!(action, Action::Confirm);
-    assert_eq!(picker.selected_indices(), vec![0]);
+    assert_eq!(picker.selected_contributors(), vec![&contributors[0]]);
 }
 
 #[test]
@@ -168,10 +151,7 @@ fn escape_cancels() {
     let contributors = contributors();
     let mut picker = Picker::new(&contributors);
 
-    let action = picker.handle_key(
-        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-        &contributors,
-    );
+    let action = picker.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
     assert_eq!(action, Action::Cancel);
 }
@@ -189,6 +169,6 @@ fn cursor_is_clamped_and_resets_after_filtering() {
     picker.move_up();
     assert_eq!(picker.cursor, 1);
 
-    type_character(&mut picker, 'a', &contributors);
+    type_character(&mut picker, 'a');
     assert_eq!(picker.cursor, 0);
 }
