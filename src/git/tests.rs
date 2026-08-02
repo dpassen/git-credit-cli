@@ -1,7 +1,8 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
 use tempfile::TempDir;
@@ -66,6 +67,39 @@ fn commit_as(dir: &Path, name: &str, email: &str, message: &str) {
     );
 }
 
+fn commit_with_non_utf8_identity_and_message(dir: &Path) {
+    let tree = git(dir, &["mktree"]);
+    let mut commit = format!("tree {tree}\nauthor Legacy ").into_bytes();
+    commit.extend_from_slice(
+        b"\xff Name <legacy@example.com> 1700000000 +0000\n\
+committer Test Author <author@example.com> 1700000000 +0000\n\
+\nLegacy \xff commit\n",
+    );
+
+    let mut child = Command::new("git")
+        .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("git hash-object should start");
+    child
+        .stdin
+        .take()
+        .expect("git hash-object stdin should be available")
+        .write_all(&commit)
+        .expect("raw commit should be written");
+    let output = child
+        .wait_with_output()
+        .expect("git hash-object should finish");
+    assert!(output.status.success(), "git hash-object should succeed");
+    let oid = String::from_utf8(output.stdout)
+        .expect("object ID should be UTF-8")
+        .trim()
+        .to_owned();
+    git(dir, &["update-ref", "refs/heads/main", &oid]);
+}
+
 #[test]
 fn inspects_head_from_a_subdirectory() {
     let repo = init_repository();
@@ -104,6 +138,26 @@ fn discovers_contributors_by_commit_count() {
                 commits: 1,
             },
         ]
+    );
+}
+
+#[test]
+fn contributor_discovery_tolerates_non_utf8_identities() {
+    let repo = init_repository();
+    commit_with_non_utf8_identity_and_message(repo.path());
+    commit_as(repo.path(), "Current Author", "current@example.com", "HEAD");
+    let head = inspect_head(repo.path()).expect("HEAD should be inspected");
+
+    let contributors =
+        discover_contributors(repo.path(), &head).expect("contributors should be discovered");
+
+    assert_eq!(
+        contributors,
+        vec![Contributor {
+            name: "Legacy � Name".to_owned(),
+            email: "legacy@example.com".to_owned(),
+            commits: 1,
+        }]
     );
 }
 
@@ -237,6 +291,24 @@ fn rejects_in_progress_git_operations() {
 }
 
 #[test]
+fn reads_non_utf8_head_without_replacing_message_bytes() {
+    let repo = init_repository();
+    commit_with_non_utf8_identity_and_message(repo.path());
+    let oid = inspect_head(repo.path()).expect("HEAD should be inspected");
+
+    let info = read_commit_info(repo.path(), &oid).expect("commit information should be read");
+
+    assert_eq!(
+        info,
+        CommitInfo {
+            author_name: "Legacy � Name".to_owned(),
+            author_email: "legacy@example.com".to_owned(),
+            message: b"Legacy \xff commit\n".to_vec(),
+        }
+    );
+}
+
+#[test]
 fn reads_mailmapped_author_and_multiline_unicode_message() {
     let repo = init_repository();
     commit_as(
@@ -259,7 +331,7 @@ fn reads_mailmapped_author_and_multiline_unicode_message() {
         CommitInfo {
             author_name: "Canonical Author".to_owned(),
             author_email: "canonical@example.com".to_owned(),
-            message: "Subject\n\nBody with café.\n".to_owned(),
+            message: "Subject\n\nBody with café.\n".as_bytes().to_vec(),
         }
     );
 }
@@ -281,12 +353,13 @@ fn prepares_a_message_with_multiple_co_authors() {
     };
     let message = "Handle Unicode\n\nPreserve café text.\n\nSigned-off-by: Maintainer <maintainer@example.com>\n";
 
-    let prepared =
-        prepare_message(repo.path(), message, &[&alice, &bob]).expect("message should be prepared");
+    let prepared = prepare_message(repo.path(), message.as_bytes(), &[&alice, &bob])
+        .expect("message should be prepared");
 
     assert_eq!(
         prepared,
         "Handle Unicode\n\nPreserve café text.\n\nSigned-off-by: Maintainer <maintainer@example.com>\nCo-authored-by: Alice <alice@example.com>\nCo-authored-by: Bob <bob@example.com>\n"
+            .as_bytes()
     );
     assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), old_head);
 }
@@ -301,10 +374,10 @@ fn message_preparation_uses_gits_default_duplicate_handling() {
     };
     let message = "Subject\n\nCo-authored-by: Alice <alice@example.com>\n";
 
-    let prepared =
-        prepare_message(repo.path(), message, &[&alice]).expect("message should be prepared");
+    let prepared = prepare_message(repo.path(), message.as_bytes(), &[&alice])
+        .expect("message should be prepared");
 
-    assert_eq!(prepared, message);
+    assert_eq!(prepared, message.as_bytes());
 }
 
 #[test]
@@ -327,7 +400,7 @@ fn amendment_preserves_commit_and_working_tree_state() {
         .expect("untracked file should be written");
     let message = "Updated message\n\nCo-authored-by: Alice <alice@example.com>\n";
 
-    let new_oid = amend_head(repo.path(), message).expect("HEAD should be amended");
+    let new_oid = amend_head(repo.path(), message.as_bytes()).expect("HEAD should be amended");
 
     assert_ne!(new_oid, old_oid);
     assert_eq!(
@@ -344,7 +417,7 @@ fn amendment_preserves_commit_and_working_tree_state() {
     );
     assert_eq!(
         read_commit_info(repo.path(), &new_oid).unwrap().message,
-        message
+        message.as_bytes()
     );
     assert_eq!(
         fs::read_to_string(repo.path().join("file.txt")).unwrap(),

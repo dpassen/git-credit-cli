@@ -29,8 +29,8 @@ fn commit_info() -> CommitInfo {
         author_name: "Current Author".to_owned(),
         author_email: "current@example.com".to_owned(),
         message:
-            "Improve contributor selection\n\nShow commit context before choosing co-authors.\n"
-                .to_owned(),
+            b"Improve contributor selection\n\nShow commit context before choosing co-authors.\n"
+                .to_vec(),
     }
 }
 
