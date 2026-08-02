@@ -234,7 +234,7 @@ impl<'a> Picker<'a> {
             header_area,
         );
         frame.render_widget(
-            Paragraph::new(commit.message.as_str())
+            Paragraph::new(String::from_utf8_lossy(&commit.message))
                 .block(Block::bordered().title(" Commit message "))
                 .wrap(Wrap { trim: false }),
             message_area,

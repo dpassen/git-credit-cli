@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, hash_map::Entry},
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
 };
 
 use anyhow::{Context, bail};
@@ -11,7 +11,7 @@ use anyhow::{Context, bail};
 pub struct CommitInfo {
     pub author_name: String,
     pub author_email: String,
-    pub message: String,
+    pub message: Vec<u8>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -26,7 +26,7 @@ struct ContributorGroup {
     preferred_identity_commits: u64,
 }
 
-fn git_output(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
+fn run_git(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<Output> {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -44,8 +44,22 @@ fn git_output(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String
         bail!("{failure}: {stderr}");
     }
 
-    String::from_utf8(output.stdout)
+    Ok(output)
+}
+
+fn git_output_bytes(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<Vec<u8>> {
+    Ok(run_git(dir, args, failure)?.stdout)
+}
+
+fn git_output(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
+    let output = git_output_bytes(dir, args, failure)?;
+    String::from_utf8(output)
         .with_context(|| format!("git {} returned invalid UTF-8", args.join(" ")))
+}
+
+fn git_output_lossy(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
+    let output = git_output_bytes(dir, args, failure)?;
+    Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
 fn git_stdout(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String> {
@@ -145,12 +159,13 @@ fn git_path(dir: &Path, name: &str) -> anyhow::Result<PathBuf> {
 }
 
 pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<Contributor>> {
-    let head_author_email = git_stdout(
+    let head_author_email = git_output_lossy(
         dir,
         &["show", "--no-patch", "--format=%aE", head_oid],
         "could not read HEAD author",
     )?;
-    let output = git_stdout(
+    let head_author_email = head_author_email.trim();
+    let output = git_output_lossy(
         dir,
         &["shortlog", "--summary", "--numbered", "--email", "--all"],
         "could not discover contributors",
@@ -160,7 +175,7 @@ pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<C
     for identity in output
         .lines()
         .filter_map(parse_shortlog_line)
-        .filter(|identity| !identity.email.eq_ignore_ascii_case(&head_author_email))
+        .filter(|identity| !identity.email.eq_ignore_ascii_case(head_author_email))
     {
         let normalized_email = identity.email.to_ascii_lowercase();
         match groups.entry(normalized_email) {
@@ -184,7 +199,7 @@ pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<C
 }
 
 pub fn read_commit_info(dir: &Path, oid: &str) -> anyhow::Result<CommitInfo> {
-    let output = git_output(
+    let output = git_output_bytes(
         dir,
         &[
             "show",
@@ -194,7 +209,7 @@ pub fn read_commit_info(dir: &Path, oid: &str) -> anyhow::Result<CommitInfo> {
         ],
         "could not read commit information",
     )?;
-    let mut fields = output.splitn(3, '\0');
+    let mut fields = output.splitn(3, |byte| *byte == b'\0');
     let author_name = fields.next().unwrap_or_default();
     let author_email = fields.next().unwrap_or_default();
     let Some(message) = fields.next() else {
@@ -206,17 +221,17 @@ pub fn read_commit_info(dir: &Path, oid: &str) -> anyhow::Result<CommitInfo> {
     }
 
     Ok(CommitInfo {
-        author_name: author_name.to_owned(),
-        author_email: author_email.to_owned(),
+        author_name: String::from_utf8_lossy(author_name).into_owned(),
+        author_email: String::from_utf8_lossy(author_email).into_owned(),
         message: message.to_owned(),
     })
 }
 
 pub fn prepare_message(
     dir: &Path,
-    message: &str,
+    message: &[u8],
     contributors: &[&Contributor],
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Vec<u8>> {
     if contributors.is_empty() {
         return Ok(message.to_owned());
     }
@@ -244,7 +259,7 @@ pub fn prepare_message(
         .stdin
         .take()
         .context("failed to open git interpret-trailers stdin")?
-        .write_all(message.as_bytes());
+        .write_all(message);
     let output = child
         .wait_with_output()
         .context("failed to wait for git interpret-trailers")?;
@@ -261,10 +276,10 @@ pub fn prepare_message(
         bail!("could not prepare commit message: {stderr}");
     }
 
-    String::from_utf8(output.stdout).context("git interpret-trailers returned invalid UTF-8")
+    Ok(output.stdout)
 }
 
-pub fn amend_head(dir: &Path, message: &str) -> anyhow::Result<String> {
+pub fn amend_head(dir: &Path, message: &[u8]) -> anyhow::Result<String> {
     let mut child = Command::new("git")
         .args([
             "commit",
@@ -284,7 +299,7 @@ pub fn amend_head(dir: &Path, message: &str) -> anyhow::Result<String> {
         .stdin
         .take()
         .context("failed to open git commit --amend stdin")?
-        .write_all(message.as_bytes());
+        .write_all(message);
     let output = child
         .wait_with_output()
         .context("failed to wait for git commit --amend")?;
