@@ -3,7 +3,8 @@ use std::path::Path;
 use anyhow::bail;
 
 use crate::{
-    git::{self, CommitInfo, Contributor, Head},
+    git::{self, Head},
+    model::{CommitInfo, Contributor},
     tui,
 };
 

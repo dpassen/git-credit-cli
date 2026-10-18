@@ -7,24 +7,12 @@ use std::{
 
 use anyhow::{Context, bail};
 
+use crate::model::{CommitInfo, Contributor};
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct Head {
     pub oid: String,
     pub reference: String,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct CommitInfo {
-    pub author_name: String,
-    pub author_email: String,
-    pub message: Vec<u8>,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct Contributor {
-    pub name: String,
-    pub email: String,
-    pub commits: u64,
 }
 
 struct ContributorGroup {

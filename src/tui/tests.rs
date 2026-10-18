@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
 
 use super::{Action, Picker, Target, View, sanitize_inline, sanitize_multiline};
-use crate::git::{CommitInfo, Contributor};
+use crate::model::{CommitInfo, Contributor};
 
 fn contributors() -> Vec<Contributor> {
     vec![

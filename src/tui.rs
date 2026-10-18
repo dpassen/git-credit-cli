@@ -18,7 +18,7 @@ use ratatui::{
     widgets::{Block, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::git::{CommitInfo, Contributor};
+use crate::model::{CommitInfo, Contributor};
 
 pub fn run<'a>(
     contributors: &'a [Contributor],

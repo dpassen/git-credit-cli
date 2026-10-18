@@ -8,9 +8,10 @@ use std::{
 use tempfile::TempDir;
 
 use super::{
-    CommitInfo, Contributor, amend_head, discover_contributors, ensure_head_unchanged,
-    ensure_safe_state, inspect_head, prepare_message, read_commit_info,
+    amend_head, discover_contributors, ensure_head_unchanged, ensure_safe_state, inspect_head,
+    prepare_message, read_commit_info,
 };
+use crate::model::{CommitInfo, Contributor};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
