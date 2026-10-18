@@ -3,7 +3,7 @@ use std::{path::Path, process::Command};
 use tempfile::TempDir;
 
 use super::{amend_head_safely, amendment_summary};
-use crate::git::{self, Contributor};
+use crate::{git, model::Contributor};
 
 fn git(dir: &Path, args: &[&str]) {
     let output = Command::new("git")
