@@ -5,6 +5,7 @@ use anyhow::bail;
 use crate::{
     git::{self, Head},
     model::{CommitInfo, Contributor},
+    summary::amendment_summary,
     tui,
 };
 
@@ -15,7 +16,8 @@ pub fn run(dir: &Path) -> anyhow::Result<()> {
         &head.oid,
         "Amending HEAD will change its commit ID.",
     );
-    let Some(selected_contributors) = tui::run(&contributors, &target, &commit)? else {
+    let Some(selected_contributors) = tui::run("git-credit", &contributors, &target, &commit)?
+    else {
         return Ok(());
     };
 
@@ -61,24 +63,6 @@ fn amend_head_safely(
     git::ensure_head_unchanged(dir, expected_head)?;
     git::ensure_safe_state(dir, &expected_head.oid)?;
     git::amend_head(dir, &prepared_message).map(Some)
-}
-
-fn amendment_summary(count: usize, old_oid: &str, new_oid: &str) -> String {
-    let label = if count == 1 {
-        "co-author"
-    } else {
-        "co-authors"
-    };
-
-    format!(
-        "Added {count} {label}: {} -> {}",
-        abbreviate_oid(old_oid),
-        abbreviate_oid(new_oid)
-    )
-}
-
-fn abbreviate_oid(oid: &str) -> &str {
-    oid.get(..8).unwrap_or(oid)
 }
 
 #[cfg(test)]

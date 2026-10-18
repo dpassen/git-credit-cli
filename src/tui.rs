@@ -21,12 +21,13 @@ use ratatui::{
 use crate::model::{CommitInfo, Contributor};
 
 pub fn run<'a>(
+    command_name: &str,
     contributors: &'a [Contributor],
     target: &Target<'_>,
     commit: &CommitInfo,
 ) -> anyhow::Result<Option<Vec<&'a Contributor>>> {
     if !stdin().is_terminal() || !stdout().is_terminal() {
-        bail!("git-credit requires an interactive terminal");
+        bail!("{command_name} requires an interactive terminal");
     }
 
     let mut terminal = ratatui::try_init().context("failed to initialize terminal")?;
@@ -246,7 +247,7 @@ impl<'a> Picker<'a> {
         frame.render_widget(
             Paragraph::new(format!(
                 "{} {abbreviated_id}  Author: {} <{}>",
-                target.name,
+                sanitize_inline(target.name),
                 sanitize_inline(&commit.author_name),
                 sanitize_inline(&commit.author_email)
             )),
@@ -301,7 +302,10 @@ impl<'a> Picker<'a> {
         let [body_area, help_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
 
-        let mut body = format!("Add these co-authors to {}?\n\n", target.name);
+        let mut body = format!(
+            "Add these co-authors to {}?\n\n",
+            sanitize_inline(target.name)
+        );
         for index in &self.selected {
             let contributor = &self.contributors[*index];
             writeln!(
@@ -313,7 +317,7 @@ impl<'a> Picker<'a> {
             .expect("writing to a String should not fail");
         }
         body.push('\n');
-        body.push_str(target.rewrite_warning);
+        body.push_str(&sanitize_inline(target.rewrite_warning));
 
         frame.render_widget(
             Paragraph::new(body).block(Block::bordered().title(" Confirm co-authors ")),
