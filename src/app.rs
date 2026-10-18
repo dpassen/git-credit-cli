@@ -9,7 +9,12 @@ use crate::{
 
 pub fn run(dir: &Path) -> anyhow::Result<()> {
     let (head, contributors, commit) = load_repository(dir)?;
-    let Some(selected_contributors) = tui::run(&contributors, &head.oid, &commit)? else {
+    let target = tui::Target::new(
+        "HEAD",
+        &head.oid,
+        "Amending HEAD will change its commit ID.",
+    );
+    let Some(selected_contributors) = tui::run(&contributors, &target, &commit)? else {
         return Ok(());
     };
 

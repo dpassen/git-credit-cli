@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
 
-use super::{Action, Picker, View, sanitize_inline, sanitize_multiline};
+use super::{Action, Picker, Target, View, sanitize_inline, sanitize_multiline};
 use crate::git::{CommitInfo, Contributor};
 
 fn contributors() -> Vec<Contributor> {
@@ -38,9 +38,14 @@ fn render(picker: &Picker<'_>) -> String {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let commit = commit_info();
+    let target = Target::new(
+        "HEAD",
+        "0123456789abcdef0123456789abcdef01234567",
+        "Amending HEAD will change its commit ID.",
+    );
     terminal
         .draw(|frame| {
-            picker.render(frame, "0123456789abcdef0123456789abcdef01234567", &commit);
+            picker.render(frame, &target, &commit);
         })
         .unwrap();
     terminal.backend().to_string()
