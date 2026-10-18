@@ -109,7 +109,8 @@ fn inspects_head_from_a_subdirectory() {
 
     let head = inspect_head(&subdirectory).expect("HEAD should be inspected");
 
-    assert_eq!(head, oid);
+    assert_eq!(head.oid, oid);
+    assert_eq!(head.reference, "refs/heads/main");
 }
 
 #[test]
@@ -122,7 +123,7 @@ fn discovers_contributors_by_commit_count() {
     let head = inspect_head(repo.path()).expect("HEAD should be inspected");
 
     let contributors =
-        discover_contributors(repo.path(), &head).expect("contributors should be discovered");
+        discover_contributors(repo.path(), &head.oid).expect("contributors should be discovered");
 
     assert_eq!(
         contributors,
@@ -149,7 +150,7 @@ fn contributor_discovery_tolerates_non_utf8_identities() {
     let head = inspect_head(repo.path()).expect("HEAD should be inspected");
 
     let contributors =
-        discover_contributors(repo.path(), &head).expect("contributors should be discovered");
+        discover_contributors(repo.path(), &head.oid).expect("contributors should be discovered");
 
     assert_eq!(
         contributors,
@@ -174,7 +175,7 @@ fn contributor_discovery_honors_mailmap() {
 
     let head = inspect_head(repo.path()).expect("HEAD should be inspected");
     let contributors =
-        discover_contributors(repo.path(), &head).expect("contributors should be discovered");
+        discover_contributors(repo.path(), &head.oid).expect("contributors should be discovered");
 
     assert_eq!(
         contributors,
@@ -196,7 +197,7 @@ fn contributor_discovery_groups_normalized_emails() {
     let head = inspect_head(repo.path()).expect("HEAD should be inspected");
 
     let contributors =
-        discover_contributors(repo.path(), &head).expect("contributors should be discovered");
+        discover_contributors(repo.path(), &head.oid).expect("contributors should be discovered");
 
     assert_eq!(
         contributors,
@@ -212,6 +213,8 @@ fn contributor_discovery_groups_normalized_emails() {
 fn rejects_a_changed_head() {
     let repo = init_repository();
     let old_oid = commit_file(repo.path());
+    let old_head = inspect_head(repo.path()).expect("HEAD should be inspected");
+    assert_eq!(old_head.oid, old_oid);
     commit_as(
         repo.path(),
         "Current Author",
@@ -220,7 +223,33 @@ fn rejects_a_changed_head() {
     );
 
     let error =
-        ensure_head_unchanged(repo.path(), &old_oid).expect_err("changed HEAD should be rejected");
+        ensure_head_unchanged(repo.path(), &old_head).expect_err("changed HEAD should be rejected");
+
+    assert_eq!(error.to_string(), "HEAD changed while picker was open");
+}
+
+#[test]
+fn rejects_a_switched_branch_at_the_same_commit() {
+    let repo = init_repository();
+    commit_file(repo.path());
+    let old_head = inspect_head(repo.path()).expect("HEAD should be inspected");
+    git(repo.path(), &["checkout", "--quiet", "-b", "other"]);
+
+    let error = ensure_head_unchanged(repo.path(), &old_head)
+        .expect_err("a switched branch should be rejected");
+
+    assert_eq!(error.to_string(), "HEAD changed while picker was open");
+}
+
+#[test]
+fn rejects_a_detached_head_at_the_same_commit() {
+    let repo = init_repository();
+    commit_file(repo.path());
+    let old_head = inspect_head(repo.path()).expect("HEAD should be inspected");
+    git(repo.path(), &["checkout", "--quiet", "--detach", "HEAD"]);
+
+    let error = ensure_head_unchanged(repo.path(), &old_head)
+        .expect_err("a detached HEAD should be rejected");
 
     assert_eq!(error.to_string(), "HEAD changed while picker was open");
 }
@@ -296,7 +325,7 @@ fn reads_non_utf8_head_without_replacing_message_bytes() {
     commit_with_non_utf8_identity_and_message(repo.path());
     let oid = inspect_head(repo.path()).expect("HEAD should be inspected");
 
-    let info = read_commit_info(repo.path(), &oid).expect("commit information should be read");
+    let info = read_commit_info(repo.path(), &oid.oid).expect("commit information should be read");
 
     assert_eq!(
         info,
