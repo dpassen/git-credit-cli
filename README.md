@@ -7,11 +7,12 @@
 [![lint](https://github.com/dpassen/git-credit-cli/actions/workflows/lint.yaml/badge.svg)](https://github.com/dpassen/git-credit-cli/actions/workflows/lint.yaml)
 [![format](https://github.com/dpassen/git-credit-cli/actions/workflows/format.yaml/badge.svg)](https://github.com/dpassen/git-credit-cli/actions/workflows/format.yaml)
 
-CLI for safely adding `Co-authored-by` trailers to your latest Git commit.
+CLIs for safely adding `Co-authored-by` trailers to Git commits and Jujutsu
+changes.
 
-`git-credit` finds contributors in repository history, lets you fuzzy-search and
-select them, previews the resulting trailers, and amends `HEAD` after
-confirmation.
+`git-credit` and `jj-credit` find contributors in repository history, let you
+fuzzy-search and select them, and preview the resulting trailers before
+rewriting the target commit.
 
 ## Installation
 
@@ -21,12 +22,27 @@ Install from crates.io with Cargo:
 cargo install git-credit-cli
 ```
 
-This installs a binary named `git-credit`. Git discovers executables named
+This installs `git-credit` and `jj-credit`. Git discovers executables named
 `git-*`, so both forms work:
 
 ```console
 git-credit
 git credit
+```
+
+Jujutsu aliases can invoke external commands through `jj util exec`. Add this to
+your Jujutsu configuration to make `jj credit` available:
+
+```toml
+[aliases]
+credit = ["util", "exec", "--", "jj-credit"]
+```
+
+Pass the required revision when invoking the alias:
+
+```console
+jj credit -r @
+jj credit -r @-
 ```
 
 ## Usage

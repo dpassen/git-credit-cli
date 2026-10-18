@@ -18,6 +18,10 @@ path = "src/lib.rs"
 name = "git-credit"
 path = "src/bin/git-credit.rs"
 
+[[bin]]
+name = "jj-credit"
+path = "src/bin/jj-credit.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.4", features = ["derive"] }
