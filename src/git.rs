@@ -8,6 +8,12 @@ use std::{
 use anyhow::{Context, bail};
 
 #[derive(Debug, Eq, PartialEq)]
+pub struct Head {
+    pub oid: String,
+    pub reference: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct CommitInfo {
     pub author_name: String,
     pub author_email: String,
@@ -66,7 +72,7 @@ fn git_stdout(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<String
     git_output(dir, args, failure).map(|stdout| stdout.trim().to_owned())
 }
 
-pub fn inspect_head(dir: &Path) -> anyhow::Result<String> {
+pub fn inspect_head(dir: &Path) -> anyhow::Result<Head> {
     let inside_work_tree = git_stdout(
         dir,
         &["rev-parse", "--is-inside-work-tree"],
@@ -77,29 +83,33 @@ pub fn inspect_head(dir: &Path) -> anyhow::Result<String> {
         bail!("not inside a Git working tree");
     }
 
-    git_stdout(
+    let reference = git_stdout(
         dir,
-        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        &["symbolic-ref", "--quiet", "HEAD"],
         "HEAD is detached",
     )?;
-
     let oid = git_stdout(
         dir,
         &["rev-parse", "--verify", "HEAD^{commit}"],
         "could not resolve HEAD to a commit",
     )?;
 
-    Ok(oid)
+    Ok(Head { oid, reference })
 }
 
-pub fn ensure_head_unchanged(dir: &Path, expected_oid: &str) -> anyhow::Result<()> {
+pub fn ensure_head_unchanged(dir: &Path, expected: &Head) -> anyhow::Result<()> {
+    let current_reference = git_stdout(
+        dir,
+        &["symbolic-ref", "--quiet", "HEAD"],
+        "HEAD changed while picker was open",
+    )?;
     let current_oid = git_stdout(
         dir,
         &["rev-parse", "--verify", "HEAD^{commit}"],
         "HEAD changed while picker was open",
     )?;
 
-    if current_oid != expected_oid {
+    if current_reference != expected.reference || current_oid != expected.oid {
         bail!("HEAD changed while picker was open");
     }
 

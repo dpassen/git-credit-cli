@@ -3,13 +3,13 @@ use std::path::Path;
 use anyhow::bail;
 
 use crate::{
-    git::{self, CommitInfo, Contributor},
+    git::{self, CommitInfo, Contributor, Head},
     tui,
 };
 
 pub fn run(dir: &Path) -> anyhow::Result<()> {
-    let (head_oid, contributors, commit) = load_repository(dir)?;
-    let Some(selected_contributors) = tui::run(&contributors, &head_oid, &commit)? else {
+    let (head, contributors, commit) = load_repository(dir)?;
+    let Some(selected_contributors) = tui::run(&contributors, &head.oid, &commit)? else {
         return Ok(());
     };
 
@@ -17,35 +17,35 @@ pub fn run(dir: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let new_oid = amend_head_safely(dir, &head_oid, &commit.message, &selected_contributors)?;
-    let summary = amendment_summary(selected_contributors.len(), &head_oid, &new_oid);
+    let new_oid = amend_head_safely(dir, &head, &commit.message, &selected_contributors)?;
+    let summary = amendment_summary(selected_contributors.len(), &head.oid, &new_oid);
     println!("{summary}");
 
     Ok(())
 }
 
-fn load_repository(dir: &Path) -> anyhow::Result<(String, Vec<Contributor>, CommitInfo)> {
-    let head_oid = git::inspect_head(dir)?;
-    git::ensure_safe_state(dir, &head_oid)?;
-    let contributors = git::discover_contributors(dir, &head_oid)?;
+fn load_repository(dir: &Path) -> anyhow::Result<(Head, Vec<Contributor>, CommitInfo)> {
+    let head = git::inspect_head(dir)?;
+    git::ensure_safe_state(dir, &head.oid)?;
+    let contributors = git::discover_contributors(dir, &head.oid)?;
 
     if contributors.is_empty() {
         bail!("no usable contributors found");
     }
 
-    let commit = git::read_commit_info(dir, &head_oid)?;
-    Ok((head_oid, contributors, commit))
+    let commit = git::read_commit_info(dir, &head.oid)?;
+    Ok((head, contributors, commit))
 }
 
 fn amend_head_safely(
     dir: &Path,
-    expected_oid: &str,
+    expected_head: &Head,
     message: &[u8],
     contributors: &[&Contributor],
 ) -> anyhow::Result<String> {
-    git::ensure_head_unchanged(dir, expected_oid)?;
-    git::ensure_safe_state(dir, expected_oid)?;
     let message = git::prepare_message(dir, message, contributors)?;
+    git::ensure_head_unchanged(dir, expected_head)?;
+    git::ensure_safe_state(dir, &expected_head.oid)?;
     git::amend_head(dir, &message)
 }
 
