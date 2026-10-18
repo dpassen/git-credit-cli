@@ -22,7 +22,7 @@ use crate::git::{CommitInfo, Contributor};
 
 pub fn run<'a>(
     contributors: &'a [Contributor],
-    head_oid: &str,
+    target: &Target<'_>,
     commit: &CommitInfo,
 ) -> anyhow::Result<Option<Vec<&'a Contributor>>> {
     if !stdin().is_terminal() || !stdout().is_terminal() {
@@ -30,7 +30,7 @@ pub fn run<'a>(
     }
 
     let mut terminal = ratatui::try_init().context("failed to initialize terminal")?;
-    let result = run_list(&mut terminal, contributors, head_oid, commit);
+    let result = run_list(&mut terminal, contributors, target, commit);
     ratatui::try_restore().context("failed to restore terminal")?;
     result
 }
@@ -38,13 +38,13 @@ pub fn run<'a>(
 fn run_list<'a>(
     terminal: &mut ratatui::DefaultTerminal,
     contributors: &'a [Contributor],
-    head_oid: &str,
+    target: &Target<'_>,
     commit: &CommitInfo,
 ) -> anyhow::Result<Option<Vec<&'a Contributor>>> {
     let mut picker = Picker::new(contributors);
 
     loop {
-        terminal.draw(|frame| picker.render(frame, head_oid, commit))?;
+        terminal.draw(|frame| picker.render(frame, target, commit))?;
 
         let event = event::read().context("failed to read terminal input")?;
         let Some(key) = event.as_key_press_event() else {
@@ -55,6 +55,22 @@ fn run_list<'a>(
             Action::Continue => {}
             Action::Confirm => return Ok(Some(picker.selected_contributors())),
             Action::Cancel => return Ok(None),
+        }
+    }
+}
+
+pub(crate) struct Target<'a> {
+    name: &'a str,
+    id: &'a str,
+    rewrite_warning: &'a str,
+}
+
+impl<'a> Target<'a> {
+    pub(crate) fn new(name: &'a str, id: &'a str, rewrite_warning: &'a str) -> Self {
+        Self {
+            name,
+            id,
+            rewrite_warning,
         }
     }
 }
@@ -208,14 +224,14 @@ impl<'a> Picker<'a> {
             .extend(self.match_scores.iter().map(|(index, _)| index));
     }
 
-    fn render(&self, frame: &mut Frame, head_oid: &str, commit: &CommitInfo) {
+    fn render(&self, frame: &mut Frame, target: &Target<'_>, commit: &CommitInfo) {
         match self.view {
-            View::Picker => self.render_picker(frame, head_oid, commit),
-            View::Confirmation => self.render_confirmation(frame),
+            View::Picker => self.render_picker(frame, target, commit),
+            View::Confirmation => self.render_confirmation(frame, target),
         }
     }
 
-    fn render_picker(&self, frame: &mut Frame, head_oid: &str, commit: &CommitInfo) {
+    fn render_picker(&self, frame: &mut Frame, target: &Target<'_>, commit: &CommitInfo) {
         let message_height = frame.area().height.saturating_sub(8).min(8);
         let [header_area, message_area, search_area, list_area, help_area] = Layout::vertical([
             Constraint::Length(1),
@@ -226,10 +242,11 @@ impl<'a> Picker<'a> {
         ])
         .areas(frame.area());
 
-        let abbreviated_oid = head_oid.get(..8).unwrap_or(head_oid);
+        let abbreviated_id = target.id.get(..8).unwrap_or(target.id);
         frame.render_widget(
             Paragraph::new(format!(
-                "HEAD {abbreviated_oid}  Author: {} <{}>",
+                "{} {abbreviated_id}  Author: {} <{}>",
+                target.name,
                 sanitize_inline(&commit.author_name),
                 sanitize_inline(&commit.author_email)
             )),
@@ -280,11 +297,11 @@ impl<'a> Picker<'a> {
         );
     }
 
-    fn render_confirmation(&self, frame: &mut Frame) {
+    fn render_confirmation(&self, frame: &mut Frame, target: &Target<'_>) {
         let [body_area, help_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
 
-        let mut body = String::from("Add these co-authors to HEAD?\n\n");
+        let mut body = format!("Add these co-authors to {}?\n\n", target.name);
         for index in &self.selected {
             let contributor = &self.contributors[*index];
             writeln!(
@@ -295,7 +312,8 @@ impl<'a> Picker<'a> {
             )
             .expect("writing to a String should not fail");
         }
-        body.push_str("\nAmending HEAD will change its commit ID.");
+        body.push('\n');
+        body.push_str(target.rewrite_warning);
 
         frame.render_widget(
             Paragraph::new(body).block(Block::bordered().title(" Confirm co-authors ")),
