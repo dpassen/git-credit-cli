@@ -17,7 +17,11 @@ pub fn run(dir: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let new_oid = amend_head_safely(dir, &head, &commit.message, &selected_contributors)?;
+    let Some(new_oid) = amend_head_safely(dir, &head, &commit.message, &selected_contributors)?
+    else {
+        println!("No new co-author trailers to add.");
+        return Ok(());
+    };
     let summary = amendment_summary(selected_contributors.len(), &head.oid, &new_oid);
     println!("{summary}");
 
@@ -42,11 +46,15 @@ fn amend_head_safely(
     expected_head: &Head,
     message: &[u8],
     contributors: &[&Contributor],
-) -> anyhow::Result<String> {
-    let message = git::prepare_message(dir, message, contributors)?;
+) -> anyhow::Result<Option<String>> {
+    let prepared_message = git::prepare_message(dir, message, contributors)?;
+    if prepared_message == message {
+        return Ok(None);
+    }
+
     git::ensure_head_unchanged(dir, expected_head)?;
     git::ensure_safe_state(dir, &expected_head.oid)?;
-    git::amend_head(dir, &message)
+    git::amend_head(dir, &prepared_message).map(Some)
 }
 
 fn amendment_summary(count: usize, old_oid: &str, new_oid: &str) -> String {
