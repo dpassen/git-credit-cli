@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
 
-use super::{Action, Picker, View};
+use super::{Action, Picker, View, sanitize_inline, sanitize_multiline};
 use crate::git::{CommitInfo, Contributor};
 
 fn contributors() -> Vec<Contributor> {
@@ -49,6 +49,22 @@ fn render(picker: &Picker<'_>) -> String {
 fn type_character(picker: &mut Picker<'_>, character: char) {
     let action = picker.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
     assert_eq!(action, Action::Continue);
+}
+
+#[test]
+fn sanitizes_terminal_control_characters() {
+    assert_eq!(
+        sanitize_inline("Alice\x1b]2;owned\x07\n"),
+        "Alice�]2;owned��"
+    );
+    assert_eq!(
+        sanitize_multiline("Subject\nBody\t\x1b[2J"),
+        "Subject\nBody��[2J"
+    );
+    assert!(matches!(
+        sanitize_inline("Renée Example"),
+        std::borrow::Cow::Borrowed(_)
+    ));
 }
 
 #[test]

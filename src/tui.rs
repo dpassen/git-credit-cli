@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::BTreeSet,
     fmt::Write as _,
     io::{IsTerminal, stdin, stdout},
@@ -229,18 +230,21 @@ impl<'a> Picker<'a> {
         frame.render_widget(
             Paragraph::new(format!(
                 "HEAD {abbreviated_oid}  Author: {} <{}>",
-                commit.author_name, commit.author_email
+                sanitize_inline(&commit.author_name),
+                sanitize_inline(&commit.author_email)
             )),
             header_area,
         );
+        let message = String::from_utf8_lossy(&commit.message);
+        let message = sanitize_multiline(&message);
         frame.render_widget(
-            Paragraph::new(String::from_utf8_lossy(&commit.message))
+            Paragraph::new(message.as_ref())
                 .block(Block::bordered().title(" Commit message "))
                 .wrap(Wrap { trim: false }),
             message_area,
         );
 
-        let search = Paragraph::new(format!("{}▏", self.query))
+        let search = Paragraph::new(format!("{}▏", sanitize_inline(&self.query)))
             .block(Block::bordered().title(" Search contributors "));
         frame.render_widget(search, search_area);
 
@@ -253,7 +257,9 @@ impl<'a> Picker<'a> {
             };
             ListItem::new(format!(
                 "{marker} {} <{}>  {} commits",
-                contributor.name, contributor.email, contributor.commits
+                sanitize_inline(&contributor.name),
+                sanitize_inline(&contributor.email),
+                contributor.commits
             ))
         });
         let list = List::new(items)
@@ -284,7 +290,8 @@ impl<'a> Picker<'a> {
             writeln!(
                 body,
                 "Co-authored-by: {} <{}>",
-                contributor.name, contributor.email
+                sanitize_inline(&contributor.name),
+                sanitize_inline(&contributor.email)
             )
             .expect("writing to a String should not fail");
         }
@@ -296,6 +303,35 @@ impl<'a> Picker<'a> {
         );
         frame.render_widget(Paragraph::new("Enter confirm  Esc back"), help_area);
     }
+}
+
+fn sanitize_inline(text: &str) -> Cow<'_, str> {
+    sanitize_text(text, false)
+}
+
+fn sanitize_multiline(text: &str) -> Cow<'_, str> {
+    sanitize_text(text, true)
+}
+
+fn sanitize_text(text: &str, preserve_newlines: bool) -> Cow<'_, str> {
+    if !text
+        .chars()
+        .any(|character| character.is_control() && !(preserve_newlines && character == '\n'))
+    {
+        return Cow::Borrowed(text);
+    }
+
+    Cow::Owned(
+        text.chars()
+            .map(|character| {
+                if character.is_control() && !(preserve_newlines && character == '\n') {
+                    '\u{fffd}'
+                } else {
+                    character
+                }
+            })
+            .collect(),
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
