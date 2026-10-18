@@ -1,7 +1,3 @@
-mod app;
-mod git;
-mod tui;
-
 use clap::Parser;
 
 #[derive(Parser)]
@@ -14,5 +10,5 @@ struct Args;
 
 fn main() -> anyhow::Result<()> {
     Args::parse();
-    app::run(&std::env::current_dir()?)
+    git_credit::run(&std::env::current_dir()?)
 }

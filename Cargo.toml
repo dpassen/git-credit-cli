@@ -10,9 +10,13 @@ repository = "https://github.com/dpassen/git-credit-cli"
 keywords = ["git", "cli", "co-authored-by", "commit", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
+[lib]
+name = "git_credit"
+path = "src/lib.rs"
+
 [[bin]]
 name = "git-credit"
-path = "src/main.rs"
+path = "src/bin/git-credit.rs"
 
 [dependencies]
 anyhow = "1.0.104"
