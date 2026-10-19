@@ -6,7 +6,7 @@ use crate::{
     git::{self, Head},
     model::{CommitInfo, Contributor},
     summary::amendment_summary,
-    tui,
+    trailers, tui,
 };
 
 pub fn run(dir: &Path) -> anyhow::Result<()> {
@@ -55,7 +55,7 @@ fn amend_head_safely(
     message: &[u8],
     contributors: &[&Contributor],
 ) -> anyhow::Result<Option<String>> {
-    let prepared_message = git::prepare_message(dir, message, contributors)?;
+    let prepared_message = trailers::prepare_message(dir, message, contributors)?;
     if prepared_message == message {
         return Ok(None);
     }

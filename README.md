@@ -76,9 +76,17 @@ Added 2 co-authors: 0123abcd -> 4567efab
 
 ## Contributor discovery
 
-Contributors come from commits reachable through `--all`. `git-credit` uses
-Git's mailmap support, groups identities by normalized email address, and ranks
-them by authored commit count. The primary author of `HEAD` is excluded.
+`git-credit` discovers contributors from commits reachable through `--all`.
+It uses Git's mailmap support, groups identities by normalized email address,
+and ranks them by authored commit count. The primary author of `HEAD` is
+excluded.
+
+`jj-credit` discovers contributors from `jj log -r 'all()'`, using both each
+revision's author and committer identities. It groups identities by normalized
+email address, counts an identity at most once per revision, and excludes the
+target revision's primary author. Contributors are ranked in one list using
+`authored + committed-only / (committed-only + 1)`, so any authored revision
+outweighs any number of committer-only revisions.
 
 Identities must already exist in repository history. `git-credit` does not query
 GitHub, GitLab, or another network service.
