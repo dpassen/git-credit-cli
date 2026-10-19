@@ -2,18 +2,17 @@ use std::path::Path;
 
 use anyhow::bail;
 
-use crate::{git, jj, model::Contributor, summary::amendment_summary, tui};
+use crate::{jj, model::Contributor, summary::amendment_summary, trailers, tui};
 
 pub fn run(dir: &Path, revision: &str) -> anyhow::Result<()> {
     let target = jj::inspect_target(dir, revision)?;
-    git::ensure_safe_state(dir, "HEAD")?;
-    let contributors = git::discover_contributors(dir, &target.commit_id)?;
+    let contributors = jj::discover_contributors(dir, &target.author_email)?;
 
     if contributors.is_empty() {
         bail!("no usable contributors found");
     }
 
-    let commit = git::read_commit_info(dir, &target.commit_id)?;
+    let commit = jj::commit_info(&target);
     let rewrite_warning = format!("Rewriting {} will change its commit ID.", target.selector);
     let tui_target = tui::Target::new(&target.selector, &target.commit_id, &rewrite_warning);
     let Some(selected_contributors) = tui::run("jj-credit", &contributors, &tui_target, &commit)?
@@ -43,12 +42,11 @@ fn rewrite_target_safely(
     message: &[u8],
     contributors: &[&Contributor],
 ) -> anyhow::Result<Option<String>> {
-    let prepared_message = git::prepare_message(dir, message, contributors)?;
+    let prepared_message = trailers::prepare_message(dir, message, contributors)?;
     if prepared_message == message {
         return Ok(None);
     }
 
     let current_target = jj::ensure_target_unchanged(dir, expected_target)?;
-    git::ensure_safe_state(dir, "HEAD")?;
     jj::describe(dir, &current_target, &prepared_message).map(Some)
 }

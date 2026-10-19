@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashMap, hash_map::Entry},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
@@ -7,17 +6,12 @@ use std::{
 
 use anyhow::{Context, bail};
 
-use crate::model::{CommitInfo, Contributor};
+use crate::model::{CommitInfo, Contributor, consolidate_contributors};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Head {
     pub oid: String,
     pub reference: String,
-}
-
-struct ContributorGroup {
-    contributor: Contributor,
-    preferred_identity_commits: u64,
 }
 
 fn run_git(dir: &Path, args: &[&str], failure: &str) -> anyhow::Result<Output> {
@@ -169,31 +163,12 @@ pub fn discover_contributors(dir: &Path, head_oid: &str) -> anyhow::Result<Vec<C
         "could not discover contributors",
     )?;
 
-    let mut groups: HashMap<String, ContributorGroup> = HashMap::new();
-    for identity in output
-        .lines()
-        .filter_map(parse_shortlog_line)
-        .filter(|identity| !identity.email.eq_ignore_ascii_case(head_author_email))
-    {
-        let normalized_email = identity.email.to_ascii_lowercase();
-        match groups.entry(normalized_email) {
-            Entry::Occupied(mut entry) => entry.get_mut().add(identity),
-            Entry::Vacant(entry) => {
-                let preferred_identity_commits = identity.commits;
-                entry.insert(ContributorGroup {
-                    contributor: identity,
-                    preferred_identity_commits,
-                });
-            }
-        }
-    }
-
-    let mut contributors: Vec<_> = groups
-        .into_values()
-        .map(|group| group.contributor)
-        .collect();
-    contributors.sort_by(contributor_order);
-    Ok(contributors)
+    Ok(consolidate_contributors(
+        output
+            .lines()
+            .filter_map(parse_shortlog_line)
+            .filter(|identity| !identity.email.eq_ignore_ascii_case(head_author_email)),
+    ))
 }
 
 pub fn read_commit_info(dir: &Path, oid: &str) -> anyhow::Result<CommitInfo> {
@@ -223,58 +198,6 @@ pub fn read_commit_info(dir: &Path, oid: &str) -> anyhow::Result<CommitInfo> {
         author_email: String::from_utf8_lossy(author_email).into_owned(),
         message: message.to_owned(),
     })
-}
-
-pub fn prepare_message(
-    dir: &Path,
-    message: &[u8],
-    contributors: &[&Contributor],
-) -> anyhow::Result<Vec<u8>> {
-    if contributors.is_empty() {
-        return Ok(message.to_owned());
-    }
-
-    let mut command = Command::new("git");
-    command
-        .arg("interpret-trailers")
-        .arg("--no-in-place")
-        .current_dir(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    for contributor in contributors {
-        command.arg("--trailer").arg(format!(
-            "Co-authored-by: {} <{}>",
-            contributor.name, contributor.email
-        ));
-    }
-
-    let mut child = command
-        .spawn()
-        .context("failed to run git interpret-trailers")?;
-    let write_result = child
-        .stdin
-        .take()
-        .context("failed to open git interpret-trailers stdin")?
-        .write_all(message);
-    let output = child
-        .wait_with_output()
-        .context("failed to wait for git interpret-trailers")?;
-    write_result.context("failed to write commit message to git interpret-trailers")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr = stderr.trim();
-
-        if stderr.is_empty() {
-            bail!("could not prepare commit message");
-        }
-
-        bail!("could not prepare commit message: {stderr}");
-    }
-
-    Ok(output.stdout)
 }
 
 pub fn amend_head(dir: &Path, message: &[u8]) -> anyhow::Result<String> {
@@ -326,23 +249,6 @@ pub fn amend_head(dir: &Path, message: &[u8]) -> anyhow::Result<String> {
     )
 }
 
-impl ContributorGroup {
-    fn add(&mut self, identity: Contributor) {
-        let is_preferred = identity.commits > self.preferred_identity_commits
-            || (identity.commits == self.preferred_identity_commits
-                && (&identity.name, &identity.email)
-                    < (&self.contributor.name, &self.contributor.email));
-
-        self.contributor.commits += identity.commits;
-
-        if is_preferred {
-            self.contributor.name = identity.name;
-            self.contributor.email = identity.email;
-            self.preferred_identity_commits = identity.commits;
-        }
-    }
-}
-
 fn parse_shortlog_line(line: &str) -> Option<Contributor> {
     let (commits, identity) = line.split_once('\t')?;
     let commits = commits.trim().parse().ok()?;
@@ -360,14 +266,6 @@ fn parse_shortlog_line(line: &str) -> Option<Contributor> {
         email: email.to_owned(),
         commits,
     })
-}
-
-fn contributor_order(left: &Contributor, right: &Contributor) -> std::cmp::Ordering {
-    right
-        .commits
-        .cmp(&left.commits)
-        .then_with(|| left.name.cmp(&right.name))
-        .then_with(|| left.email.cmp(&right.email))
 }
 
 #[cfg(test)]
